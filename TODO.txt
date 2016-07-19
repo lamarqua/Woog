@@ -1,0 +1,13 @@
+TODO.txt
+- investigate proper loading of javascript files / external resources
+> according to my research the best way is to just do what we do!
+
+- at some point think of a way to structure the whole thing
+still relevant, but we can keep adding stuff for now
+
+- Ideas for stuff to implement:
+ * polyphony
+ * custom oscillator waveforms
+	 * investigate why changing frequency on oscillator changes so slowly while listening
+	 -> apparently ppl recommend creating an oscillator for every note
+ * adding LFO effects: tremolo, vibrato, etc
