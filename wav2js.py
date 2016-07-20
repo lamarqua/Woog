@@ -31,7 +31,7 @@ if __name__ == "__main__":
 
 		json_data = { "left" : convert_data_to_float(data_L, bytes_per_sample), "right" : convert_data_to_float(data_R, bytes_per_sample) }
 
-		print("var data = ", json.dumps(json_data, indent=4))
+		print("var reverbData = ", json.dumps(json_data, indent=4))
 
 		# print("var myArrayBuffer = audioCtx.createBuffer(%d, %d, audioCtx.sampleRate);"
 		# 	% (f.getnchannels(), f.getnframes()))
