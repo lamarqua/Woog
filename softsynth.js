@@ -9,8 +9,12 @@ const A4_FREQ = 440;
 const A4_MIDI_NUMBER = 69;
 
 const MAX_VOICES = 4;
+const OSC_TYPE = "sine";
 
-var midi, reverbData, keysPressed = [], oscillators = {};
+const ADS_LENGTH = 0.5;
+const R_LENGTH = 1.0;
+
+var midi, reverbData, keysPressed = [], voices = {};
 
 // Initialization code
 // request MIDI access
@@ -55,8 +59,20 @@ function onMIDIMessage(message) {
             keysPressed.push(note);
             console.log(keysPressed.map(readableNote));
 
-            if (oscillators.length < MAX_VOICES - 1) {
-                // var osc =
+            if (Object.keys(voices).length < MAX_VOICES) {
+                var osc = aCon.createOscillator();
+                osc.frequency.value = frequencyFromNote(note);
+                osc.type = OSC_TYPE;
+                osc.start();
+
+                var gain = aCon.createGain();
+                gain.gain.setValueCurveAtTime(ADS, aCon.currentTime, ADS_LENGTH);
+
+                osc.connect(gain);
+                gain.connect(aCon.destination);
+
+                voices[note] = { "osc" : osc, "gain": gain };
+                console.log("KEY_PRESSED: voices = ", voices);
             }
             break;
         case KEY_RELEASE:
@@ -64,21 +80,36 @@ function onMIDIMessage(message) {
             if (i > -1) {
                 keysPressed.splice(i, 1);
             }
-            break;
-    }
+            console.log("KEY_RELEASED: voices = ", voices);
 
-    switch (cmd) {
-        case KEY_PRESSED:
-            var curNote = keysPressed[keysPressed.length - 1];
-            oscillator.frequency.value = frequencyFromNote(curNote);
-            gainNode.gain.setValueCurveAtTime(ADS, aCon.currentTime, 0.5);
-            break;
-        case KEY_RELEASE:
-            if (keysPressed.length === 0) {
-                gainNode.gain.setValueCurveAtTime(R, aCon.currentTime, 1.0);
+            if (voices[note]) {
+                voices[note]["gain"].gain.setValueCurveAtTime(R, aCon.currentTime, R_LENGTH);
+
+                setTimeout(function () {
+                    var osc = voices[note]["osc"];
+                    var gain = voices[note]["gain"];
+
+                    osc.stop();
+                    osc.disconnect();
+                    gain.disconnect();
+                    delete voices[note];
+                }, R_LENGTH * 1000 /* milliseconds */);
             }
             break;
     }
+
+    // switch (cmd) {
+    //     case KEY_PRESSED:
+    //         var curNote = keysPressed[keysPressed.length - 1];
+    //         oscillator.frequency.value = frequencyFromNote(curNote);
+    //         gainNode.gain.setValueCurveAtTime(ADS, aCon.currentTime, 0.5);
+    //         break;
+    //     case KEY_RELEASE:
+    //         if (keysPressed.length === 0) {
+    //             gainNode.gain.setValueCurveAtTime(R, aCon.currentTime, 1.0);
+    //         }
+    //         break;
+    // }
     // if (cmd == KEY_PRESSED) {
     //     oscillator.frequency.value = frequencyFromNote(note);
     //     console.log(frequency);
@@ -101,25 +132,25 @@ function readableNote(note) {
 // Create audio context
 var aCon = new AudioContext();
 
-var oscillator = aCon.createOscillator();
-var gainNode = aCon.createGain();
+// var oscillator = aCon.createOscillator();
+// var gainNode = aCon.createGain();
 
-var reverbBuffer = aCon.createBuffer(2, reverbData.left.length, aCon.sampleRate);
-reverbBuffer.copyToChannel(Float32Array.from(reverbData.left), 0, 0);
-reverbBuffer.copyToChannel(Float32Array.from(reverbData.right), 1, 0);
+// var reverbBuffer = aCon.createBuffer(2, reverbData.left.length, aCon.sampleRate);
+// reverbBuffer.copyToChannel(Float32Array.from(reverbData.left), 0, 0);
+// reverbBuffer.copyToChannel(Float32Array.from(reverbData.right), 1, 0);
 
-var convolution = aCon.createConvolver();
-convolution.buffer = reverbBuffer;
+// var convolution = aCon.createConvolver();
+// convolution.buffer = reverbBuffer;
 
-var frequency = 1000;
+// var frequency = 1000;
 
-oscillator.type = "sine";
-oscillator.frequency.value = frequency;
-oscillator.connect(gainNode);
-gainNode.connect(convolution);
-oscillator.start();
-convolution.connect(aCon.destination);
-gainNode.gain.value = 0;
+// oscillator.type = "sine";
+// oscillator.frequency.value = frequency;
+// oscillator.connect(gainNode);
+// gainNode.connect(convolution);
+// oscillator.start();
+// convolution.connect(aCon.destination);
+// gainNode.gain.value = 0;
 
 
 var ADS = new Float32Array(3);
