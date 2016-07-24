@@ -111,7 +111,9 @@ function reclaimVoices(voices, keysPressed) {
 function allocateVoices(voices, notes) {
     let highestPriorityNotes = getHighestPriorityNotes(notes);
     console.log("highestPriorityNotes", highestPriorityNotes);
-    var allocatedNotes = Object.keys(voices).map(parseInt);
+    console.log("###########", Object.keys(voices));
+    var allocatedNotes = Object.keys(voices);
+    allocatedNotes = allocatedNotes.map(function(x) { return +x; });
 
     var noteToStealFrom = undefined;
     for (var i = 0; i < allocatedNotes.length; ++i) {
