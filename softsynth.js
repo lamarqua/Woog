@@ -8,13 +8,38 @@ const PC_MESSAGE = 12;
 const A4_FREQ = 440;
 const A4_MIDI_NUMBER = 69;
 
-const MAX_VOICES = 2;
+const MAX_VOICES = 4;
 const OSC_TYPE = "sine";
 
 const ADS_LENGTH = 0.5;
 const R_LENGTH = 1.0;
 
-var midi, reverbData, gKeysPressed = [], gVoices = {};
+const SETTING_A = 5;
+const SETTING_D = 6;
+const SETTING_S = 7;
+const SETTING_R = 8;
+const ASSIGNED_KNOBS = new Set([SETTING_A, SETTING_D, SETTING_S, SETTING_R]);
+
+const MAX_A = 500;
+const MAX_D = 500;
+const MAX_R = 2000;
+const DEFAULT_A = 250;
+const DEFAULT_D = 250;
+const DEFAULT_R = 1000;
+
+const DEFAULT_SUSTAIN = 1.0;
+
+const MIN_ENVELOP_TIME = 20;
+
+const MIN_GAIN_VALUE = 0.0001;
+
+var midi, reverbData, gKeysPressed = [], gVoices = {}, userADSR = [];
+
+userADSR[SETTING_A] = msToS(DEFAULT_A);
+userADSR[SETTING_D] = msToS(DEFAULT_D);
+userADSR[SETTING_R] = msToS(DEFAULT_R);
+
+userADSR[SETTING_S] = DEFAULT_SUSTAIN;
 
 // Initialization code
 // request MIDI access
@@ -29,18 +54,18 @@ if (navigator.requestMIDIAccess) {
 // Create audio context
 var aCon = new AudioContext();
 
-var ADS = new Float32Array(7);
-ADS[0] = 0.5;
-ADS[1] = 0.7;
-ADS[2] = 1.0;
-ADS[3] = 0.9;
-ADS[4] = 0.8;
-ADS[5] = 0.7;
-ADS[6] = 0.7;
+// var ADS = new Float32Array(7);
+// ADS[0] = 0.5;
+// ADS[1] = 0.7;
+// ADS[2] = 1.0;
+// ADS[3] = 0.9;
+// ADS[4] = 0.8;
+// ADS[5] = 0.7;
+// ADS[6] = 0.7;
 
-var R = new Float32Array(2);
-R[0] = 0.7;
-R[1] = 0.0;
+// var R = new Float32Array(2);
+// R[0] = 0.7;
+// R[1] = 0.0;
 
 // midi functions
 function onMIDISuccess(midiAccess) {
@@ -71,24 +96,52 @@ function getLowestPriorityNotes(notes) {
     return sorted.slice(0, MAX_VOICES);
 }
 
+function lerp(a, b, t) {
+    return (b - a) * t + a;
+}
+
+function msToS(milliseconds) {
+    return milliseconds / 1000;
+}
+
 function createVoice(note) {
-    var osc = aCon.createOscillator();
-    osc.type = OSC_TYPE;
-    osc.frequency.value = frequencyFromNote(note);
-    // console.log("Frequency for note: ", note, " is ", osc.frequency.valuxe);
-    osc.start();
+    var oscNode = aCon.createOscillator();
+    oscNode.type = OSC_TYPE;
+    oscNode.frequency.value = frequencyFromNote(note);
+    // console.log("Frequency for note: ", note, " is ", oscNode.frequency.valuxe);
+    oscNode.start();
 
-    var gain = aCon.createGain();
-    gain.gain.value = 1;
+    var gainNode = aCon.createGain();
+    gainNode.gain.value = MIN_GAIN_VALUE;
 
-    osc.connect(gain);
-    gain.connect(aCon.destination);
+    var durationA = msToS(lerp(MIN_ENVELOP_TIME, MAX_A, userADSR[SETTING_A]));
+    var durationD = msToS(lerp(MIN_ENVELOP_TIME, MAX_D, userADSR[SETTING_D]));
+    var sustainLevel = Math.max(MIN_GAIN_VALUE, userADSR[SETTING_S]);
 
-    return  { "osc" : osc, "gain": gain };
+    console.log(durationA);
+    console.log(durationD);
+    console.log(sustainLevel);
+
+
+    var now = aCon.currentTime;
+    gainNode.gain.exponentialRampToValueAtTime(1, now + durationA);
+    gainNode.gain.exponentialRampToValueAtTime(sustainLevel, now + durationA + durationD);
+
+    oscNode.connect(gainNode);
+    gainNode.connect(aCon.destination);
+
+    return  { "oscNode" : oscNode, "gainNode": gainNode };
 }
 
 function killNote(voices, note) {
-    voices[note].gain.disconnect(aCon.destination);
+    // voices[note].gain.disconnect(aCon.destination);
+    // var now = aCon.currentTime;
+    // voices[note]["gainNode"].gain.cancelScheduledValues(aCon.currentTime);
+    var durationR = msToS(lerp(MIN_ENVELOP_TIME, MAX_R, userADSR[SETTING_R]));
+    console.log(durationR);
+    // voices[note]["gainNode"].gain.linearRampToValueAtTime(MIN_GAIN_VALUE, aCon.currentTime + durationR);
+    voices[note]["gainNode"].gain.setTargetAtTime(MIN_GAIN_VALUE, aCon.currentTime, durationR);
+
     delete voices[note];
 }
 
@@ -154,7 +207,7 @@ function onMIDIMessage(message) {
     // var type = data[0] & 0xf0;
     var note = data[1];
     var velocity = data[2];
-    console.log("cmd, channel, note, velocity", cmd, channel, readableNote(note), velocity);
+    console.log("cmd, channel, note, velocity", cmd, channel, note, velocity);
 
     var releasedKey = undefined;
 
@@ -171,84 +224,20 @@ function onMIDIMessage(message) {
             releasedKey = note;
             console.log("KEY_RELEASED: gKeysPressed = ", gKeysPressed.map(readableNote));
             break;
+        case CC_MESSAGE:
+            if (ASSIGNED_KNOBS.has(note)) {
+                userADSR[note] = velocity / 127;
+            }
+
     }
 
-    reclaimVoices(gVoices, gKeysPressed);
+    if (cmd === KEY_PRESSED || cmd === KEY_RELEASED) {
+        reclaimVoices(gVoices, gKeysPressed);
 
-    if (gKeysPressed.length > 0) {
-        allocateVoices(gVoices, gKeysPressed);
+        if (gKeysPressed.length > 0) {
+            allocateVoices(gVoices, gKeysPressed);
+        }
     }
-
-    // if (releasedKey) {
-    //     for (var i in voices) {
-    //         var current_voice = voices[i];
-    //         if (current_voice.note === releasedKey) {
-    //             current_voice.gain.gain.setValueCurveAtTime(R, aCon.currentTime, R_LENGTH);
-    //             current_voice.status = "dying";
-    //             current_voice.death_time = aCon.currentTime;
-    //             break;
-    //         }
-    //     }
-    // }
-
-
-    // for (var k in gKeysPressed.slice(0, MAX_VOICES)) {
-    //     var note = gKeysPressed[k];
-
-    //     if (!voices[note]) {
-
-    //     }
-    // }
-    // switch (cmd) {
-    //     case KEY_PRESSED:
-
-    //         if (gKeysPressed.indexOf(note) === -1) {
-    //             gKeysPressed.push(note);
-
-    //             if (Object.keys(voices).length < MAX_VOICES) {
-    //                 var osc = aCon.createOscillator();
-    //                 osc.frequency.value = frequencyFromNote(note);
-    //                 osc.type = OSC_TYPE;
-    //                 osc.start();
-
-    //                 var gain = aCon.createGain();
-    //                 gain.gain.setValueCurveAtTime(ADS, aCon.currentTime, ADS_LENGTH);
-
-    //                 osc.connect(gain);
-    //                 gain.connect(aCon.destination);
-
-    //                 voices[note] = { "osc" : osc, "gain": gain };
-    //                 // console.log("KEY_PRESSED: voices = ", voices);
-    //             }
-    //         }
-    //         console.log("KEY_PRESSED: gKeysPressed = ", gKeysPressed.map(readableNote));
-    //         break;
-    //     case KEY_RELEASED:
-    //         // console.log("KEY_RELEASED: voices = ", voices);
-
-    //         var i = gKeysPressed.indexOf(note);
-    //         if (i > -1) {
-    //             gKeysPressed.splice(i, 1);
-    //         }
-
-    //         if (voices[note]) {
-    //             voices[note]["gain"].gain.setValueCurveAtTime(R, aCon.currentTime, R_LENGTH);
-
-    //             setTimeout(function () {
-    //                 var osc = voices[note]["osc"];
-    //                 var gain = voices[note]["gain"];
-
-    //                 osc.stop();
-    //                 osc.disconnect();
-    //                 gain.disconnect();
-    //                 delete voices[note];
-    //             }, R_LENGTH * 1000 /* milliseconds */);
-
-    //         }
-    //         console.log("KEY_RELEASED: gKeysPressed = ", gKeysPressed.map(readableNote));
-    //         break;
-    // }
-
 }
 
 function frequencyFromNote(note) {
