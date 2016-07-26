@@ -10,32 +10,36 @@ const A4_FREQ = 440;
 const A4_MIDI_NUMBER = 69;
 
 const MAX_VOICES = 4;
-const OSC_TYPE = "square";
-
-// const ADS_LENGTH = 0.5;
-// const R_LENGTH = 1.0;
+const OSC_TYPE = "sawtooth";
 
 const MIN_GAIN_LEVEL = 0.0;
 const MAX_GAIN_LEVEL = 0.999;
 
+const SETTING_MASTER_VOLUME = 4;
 const SETTING_A = 5;
 const SETTING_D = 6;
 const SETTING_S = 7;
 const SETTING_R = 8;
-const ASSIGNED_KNOBS = new Set([SETTING_A, SETTING_D, SETTING_S, SETTING_R]);
-
-const MAX_A = 2000;
-const MAX_D = 2000;
-const MAX_R = 2000;
-const DEFAULT_A = 1000;
-const DEFAULT_D = 1000;
-const DEFAULT_R = 1000;
-
-const DEFAULT_SUSTAIN = MAX_GAIN_LEVEL;
+const SETTING_REVERB_WET_MIX = 3;
+const ADSR_ASSIGNED_KNOBS = new Set([SETTING_A, SETTING_D, SETTING_S, SETTING_R]);
 
 const MIN_ENVELOP_TIME = 2;
 
-var midi, reverbData, gKeysPressed = [], gVoices = {}, userADSR = [];
+const MAX_A = 1000;
+const MAX_D = 1000;
+const MAX_R = 1000;
+const DEFAULT_A = 500;
+const DEFAULT_D = 500;
+const DEFAULT_R = 500;
+
+const DEFAULT_SUSTAIN = MAX_GAIN_LEVEL;
+
+const DEFAULT_MASTER_VOLUME = 1.0;
+
+const DEFAULT_WET_MIX = 1;
+
+var midi, reverbData, gKeysPressed = [], gVoices = {};
+var userADSR = [], userMasterVolume = DEFAULT_MASTER_VOLUME, userReverbWetMix = DEFAULT_WET_MIX;
 
 userADSR[SETTING_A] = msToS(DEFAULT_A);
 userADSR[SETTING_D] = msToS(DEFAULT_D);
@@ -56,18 +60,26 @@ if (navigator.requestMIDIAccess) {
 // Create audio context
 var aCon = new AudioContext();
 
-// var ADS = new Float32Array(7);
-// ADS[0] = 0.5;
-// ADS[1] = 0.7;
-// ADS[2] = 1.0;
-// ADS[3] = 0.9;
-// ADS[4] = 0.8;
-// ADS[5] = 0.7;
-// ADS[6] = 0.7;
+var masterGainNode = aCon.createGain();
+masterGainNode.gain.value = userMasterVolume;
+masterGainNode.connect(aCon.destination);
 
-// var R = new Float32Array(2);
-// R[0] = 0.7;
-// R[1] = 0.0;
+var reverbDryGainNode = aCon.createGain();
+reverbDryGainNode.gain.value = 1 - DEFAULT_WET_MIX;
+reverbDryGainNode.connect(masterGainNode);
+
+var reverbWetGainNode = aCon.createGain();
+reverbWetGainNode.gain.value = DEFAULT_WET_MIX;
+reverbWetGainNode.connect(masterGainNode);
+
+
+var reverbBuffer = aCon.createBuffer(2, reverbData.left.length, aCon.sampleRate);
+reverbBuffer.copyToChannel(Float32Array.from(reverbData.left), 0, 0);
+reverbBuffer.copyToChannel(Float32Array.from(reverbData.right), 1, 0);
+
+var reverbNode = aCon.createConvolver();
+reverbNode.buffer = reverbBuffer;
+reverbNode.connect(reverbWetGainNode);
 
 // midi functions
 function onMIDISuccess(midiAccess) {
@@ -106,8 +118,6 @@ function msToS(milliseconds) {
     return milliseconds / 1000;
 }
 
-
-
 function createVoice(note) {
     var oscNode = aCon.createOscillator();
     oscNode.type = OSC_TYPE;
@@ -137,12 +147,16 @@ function createVoice(note) {
     // gainNode.gain.linearRampToValueAtTime(sustainLevel, now + durationA + durationD);
 
     oscNode.connect(gainNode);
-    gainNode.connect(aCon.destination);
+    gainNode.connect(reverbNode);
+    gainNode.connect(reverbDryGainNode);
 
     return  { "oscNode" : oscNode, "gainNode": gainNode };
 }
 
 function killNote(voices, note) {
+    // TODO: enhance to kill properly the notes when we are out of voices (note stealing).
+
+
     var gainNode = voices[note]["gainNode"];
 
     var durationR = msToS(lerp(MIN_ENVELOP_TIME, MAX_R, userADSR[SETTING_R]));
@@ -178,7 +192,7 @@ function reclaimVoices(voices, keysPressed) {
 function allocateVoices(voices, notes) {
     let highestPriorityNotes = getHighestPriorityNotes(notes);
     console.log("highestPriorityNotes", highestPriorityNotes);
-    // console.log("###########", Object.keys(voices));
+
     var allocatedNotes = Object.keys(voices);
     allocatedNotes = allocatedNotes.map(function(x) { return +x; });
 
@@ -221,7 +235,7 @@ function onMIDIMessage(message) {
     // var type = data[0] & 0xf0;
     var note = data[1];
     var velocity = data[2];
-    console.log("cmd, channel, note, velocity", cmd, channel, note, velocity);
+    // console.log("cmd, channel, note, velocity", cmd, channel, note, velocity);
 
     var releasedKey = undefined;
 
@@ -239,10 +253,19 @@ function onMIDIMessage(message) {
             console.log("KEY_RELEASED: gKeysPressed = ", gKeysPressed.map(readableNote));
             break;
         case CC_MESSAGE:
-            if (ASSIGNED_KNOBS.has(note)) {
+            if (ADSR_ASSIGNED_KNOBS.has(note)) {
                 userADSR[note] = velocity / 127;
-            }
+            } else if (note === SETTING_MASTER_VOLUME) {
+                userMasterVolume = velocity / 127;
+                console.log("userMasterVolume: ", userMasterVolume);
+                masterGainNode.gain.value = userMasterVolume;
+            } else if (note === SETTING_REVERB_WET_MIX) {
+                userReverbWetMix = velocity / 127;
+                console.log("userReverbWetMix: ", userReverbWetMix);
+                reverbDryGainNode.gain.value = 1 - userReverbWetMix;
+                reverbWetGainNode.gain.value = userReverbWetMix;
 
+            }
     }
 
     if (cmd === KEY_PRESSED || cmd === KEY_RELEASED) {
@@ -263,14 +286,6 @@ function readableNote(note) {
     var octave = parseInt(note / 12) - 1;
     return notes[note % 12] + octave.toString();
 }
-
-// var reverbBuffer = aCon.createBuffer(2, reverbData.left.length, aCon.sampleRate);
-// reverbBuffer.copyToChannel(Float32Array.from(reverbData.left), 0, 0);
-// reverbBuffer.copyToChannel(Float32Array.from(reverbData.right), 1, 0);
-
-// var convolution = aCon.createConvolver();
-// convolution.buffer = reverbBuffer;
-
 
 
 

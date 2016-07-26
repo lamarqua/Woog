@@ -1,13 +1,19 @@
 TODO.txt
-- investigate proper loading of javascript files / external resources
-> according to my research the best way is to just do what we do!
-
-- at some point think of a way to structure the whole thing
-still relevant, but we can keep adding stuff for now
-
 - Ideas for stuff to implement:
- * polyphony
  * custom oscillator waveforms
 	 * investigate why changing frequency on oscillator changes so slowly while listening
 	 -> apparently ppl recommend creating an oscillator for every note
+ 	* MOOG has square, sawtooth, triangle, square-ish with short and long duty cycles,
  * adding LFO effects: tremolo, vibrato, etc
+ * basic global filter
+ * adding back reverb w/ dry/wet control
+ * having several oscillators per waveform including white noise / pink noise
+ * allowing to switch between reverbs by pressing pad
+ * restructure ADSR code to allow reuse by per voice filter
+ * per voice filter with ADSR control
+ * implement some kind of nice sounding analog / tube distortion
+ * implement different kind of priorities and voice allocations
+ 	* fixing note killing to handle edge case
+ * having basic interface to show values
+ * visualization with built FFT stuff
+ * see if we can read MIDI files?
