@@ -1,3 +1,4 @@
+/* @flow */
 "use strict";
 
 const KEY_PRESSED = 9;
@@ -9,10 +10,13 @@ const A4_FREQ = 440;
 const A4_MIDI_NUMBER = 69;
 
 const MAX_VOICES = 4;
-const OSC_TYPE = "sine";
+const OSC_TYPE = "square";
 
-const ADS_LENGTH = 0.5;
-const R_LENGTH = 1.0;
+// const ADS_LENGTH = 0.5;
+// const R_LENGTH = 1.0;
+
+const MIN_GAIN_LEVEL = 0.0;
+const MAX_GAIN_LEVEL = 0.999;
 
 const SETTING_A = 5;
 const SETTING_D = 6;
@@ -20,18 +24,16 @@ const SETTING_S = 7;
 const SETTING_R = 8;
 const ASSIGNED_KNOBS = new Set([SETTING_A, SETTING_D, SETTING_S, SETTING_R]);
 
-const MAX_A = 500;
-const MAX_D = 500;
+const MAX_A = 2000;
+const MAX_D = 2000;
 const MAX_R = 2000;
-const DEFAULT_A = 250;
-const DEFAULT_D = 250;
+const DEFAULT_A = 1000;
+const DEFAULT_D = 1000;
 const DEFAULT_R = 1000;
 
-const DEFAULT_SUSTAIN = 1.0;
+const DEFAULT_SUSTAIN = MAX_GAIN_LEVEL;
 
-const MIN_ENVELOP_TIME = 20;
-
-const MIN_GAIN_VALUE = 0.0001;
+const MIN_ENVELOP_TIME = 2;
 
 var midi, reverbData, gKeysPressed = [], gVoices = {}, userADSR = [];
 
@@ -104,6 +106,8 @@ function msToS(milliseconds) {
     return milliseconds / 1000;
 }
 
+
+
 function createVoice(note) {
     var oscNode = aCon.createOscillator();
     oscNode.type = OSC_TYPE;
@@ -112,20 +116,25 @@ function createVoice(note) {
     oscNode.start();
 
     var gainNode = aCon.createGain();
-    gainNode.gain.value = MIN_GAIN_VALUE;
+    gainNode.gain.value = MIN_GAIN_LEVEL;
 
     var durationA = msToS(lerp(MIN_ENVELOP_TIME, MAX_A, userADSR[SETTING_A]));
     var durationD = msToS(lerp(MIN_ENVELOP_TIME, MAX_D, userADSR[SETTING_D]));
-    var sustainLevel = Math.max(MIN_GAIN_VALUE, userADSR[SETTING_S]);
+    var sustainLevel = Math.max(MIN_GAIN_LEVEL, userADSR[SETTING_S]);
 
-    console.log(durationA);
-    console.log(durationD);
-    console.log(sustainLevel);
+    console.log("durationA: ", durationA);
+    console.log("durationD: ", durationD);
+    console.log("sustainLevel: ", sustainLevel);
 
+    var rampA = new Float32Array([MIN_GAIN_LEVEL, MAX_GAIN_LEVEL]);
+    gainNode.gain.setValueCurveAtTime(rampA, aCon.currentTime, durationA);
 
-    var now = aCon.currentTime;
-    gainNode.gain.exponentialRampToValueAtTime(1, now + durationA);
-    gainNode.gain.exponentialRampToValueAtTime(sustainLevel, now + durationA + durationD);
+    var rampD = new Float32Array([MAX_GAIN_LEVEL, sustainLevel]);
+    gainNode.gain.setValueCurveAtTime(rampD, aCon.currentTime + durationA, durationD);
+
+    // var now = aCon.currentTime;
+    // gainNode.gain.linearRampToValueAtTime(1, now + durationA);
+    // gainNode.gain.linearRampToValueAtTime(sustainLevel, now + durationA + durationD);
 
     oscNode.connect(gainNode);
     gainNode.connect(aCon.destination);
@@ -134,13 +143,18 @@ function createVoice(note) {
 }
 
 function killNote(voices, note) {
-    // voices[note].gain.disconnect(aCon.destination);
-    // var now = aCon.currentTime;
-    // voices[note]["gainNode"].gain.cancelScheduledValues(aCon.currentTime);
+    var gainNode = voices[note]["gainNode"];
+
     var durationR = msToS(lerp(MIN_ENVELOP_TIME, MAX_R, userADSR[SETTING_R]));
-    console.log(durationR);
-    // voices[note]["gainNode"].gain.linearRampToValueAtTime(MIN_GAIN_VALUE, aCon.currentTime + durationR);
-    voices[note]["gainNode"].gain.setTargetAtTime(MIN_GAIN_VALUE, aCon.currentTime, durationR);
+    console.log("durationR", durationR);
+    gainNode.gain.cancelScheduledValues(aCon.currentTime);
+    var rampR = new Float32Array([voices[note]["gainNode"].gain.value, MIN_GAIN_LEVEL]);
+    gainNode.gain.setValueCurveAtTime(rampR, aCon.currentTime, durationR);
+
+    // gainNode.gain.exponentialRampToValueAtTime(MIN_GAIN_LEVEL, aCon.currentTime + 10);
+
+    // voices[note]["gainNode"].gain.linearRampToValueAtTime(MIN_GAIN_LEVEL, aCon.currentTime + durationR);
+    // voices[note]["gainNode"].gain.setTargetAtTime(MIN_GAIN_LEVEL, aCon.currentTime, durationR);
 
     delete voices[note];
 }
@@ -164,7 +178,7 @@ function reclaimVoices(voices, keysPressed) {
 function allocateVoices(voices, notes) {
     let highestPriorityNotes = getHighestPriorityNotes(notes);
     console.log("highestPriorityNotes", highestPriorityNotes);
-    console.log("###########", Object.keys(voices));
+    // console.log("###########", Object.keys(voices));
     var allocatedNotes = Object.keys(voices);
     allocatedNotes = allocatedNotes.map(function(x) { return +x; });
 
