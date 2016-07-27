@@ -287,6 +287,3 @@ function readableNote(note) {
     return notes[note % 12] + octave.toString();
 }
 
-
-
-

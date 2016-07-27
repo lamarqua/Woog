@@ -11,9 +11,24 @@ TODO.txt
  * allowing to switch between reverbs by pressing pad
  * restructure ADSR code to allow reuse by per voice filter
  * per voice filter with ADSR control
+ * ADSR implement exponential curves instead of linear
  * implement some kind of nice sounding analog / tube distortion
  * implement different kind of priorities and voice allocations
  	* fixing note killing to handle edge case
  * having basic interface to show values
  * visualization with built FFT stuff
  * see if we can read MIDI files?
+ * BitCrushing
+
+
+- Architecture and code
+ * investigate Flow
+ * architecture: create higher level objects such as Envelopes, ReverbNodeWithMix, MultiOscillator, etc... And how for example LFO node and Envelope node would have the same interface
+ * investigate user interface
+ * knob switching / better utilization
+
+
+ - Reading
+  * Flow docs
+  * Minimoog architecture / general synth architecture / vocabulary
+  * Natural distoriton
