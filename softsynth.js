@@ -15,31 +15,58 @@ const OSC_TYPE = "sawtooth";
 const MIN_GAIN_LEVEL = 0.0;
 const MAX_GAIN_LEVEL = 0.999;
 
-const SETTING_MASTER_VOLUME = 4;
+// const SETTING_MASTER_VOLUME = 4;
+const SETTING_S = 9;
+
 const SETTING_A = 5;
 const SETTING_D = 6;
-const SETTING_S = 7;
-const SETTING_R = 8;
-const SETTING_REVERB_WET_MIX = 3;
-const ADSR_ASSIGNED_KNOBS = new Set([SETTING_A, SETTING_D, SETTING_S, SETTING_R]);
+const SETTING_R = 7;
+const SETTING_REVERB_WET_MIX = 8;
+const SETTING_HIPASS_FREQ = 1;
+const SETTING_HIPASS_Q = 2;
+const SETTING_LOPASS_FREQ = 3;
+const SETTING_LOPASS_Q = 4;
+
+const ADSR_ASSIGNED_KNOBS = new Set([SETTING_A, SETTING_D, SETTING_R]);
+
 
 const MIN_ENVELOP_TIME = 2;
 
 const MAX_A = 1000;
 const MAX_D = 1000;
 const MAX_R = 1000;
-const DEFAULT_A = 500;
+const DEFAULT_A = MIN_ENVELOP_TIME;
 const DEFAULT_D = 500;
 const DEFAULT_R = 500;
 
+const MIN_HIPASS_FREQ = 0;
+const MAX_HIPASS_FREQ = 2000;
+
+const MIN_LOPASS_FREQ = 500;
+const MAX_LOPASS_FREQ = 6000;
+
+const MIN_FILTER_Q = .0001;
+const MAX_FILTER_Q = 1000;
+
+const DEFAULT_HIPASS_FREQ = MIN_HIPASS_FREQ;
+const DEFAULT_HIPASS_Q = 100;
+
+const DEFAULT_LOPASS_FREQ = MAX_LOPASS_FREQ;
+const DEFAULT_LOPASS_Q = 100;
+
 const DEFAULT_SUSTAIN = MAX_GAIN_LEVEL;
 
-const DEFAULT_MASTER_VOLUME = 1.0;
+const DEFAULT_MASTER_VOLUME = 0.9;
 
 const DEFAULT_WET_MIX = 1;
 
 var midi, reverbData, gKeysPressed = [], gVoices = {};
-var userADSR = [], userMasterVolume = DEFAULT_MASTER_VOLUME, userReverbWetMix = DEFAULT_WET_MIX;
+var userADSR = [], userHiPass = [], userLoPass = [], userMasterVolume = DEFAULT_MASTER_VOLUME, userReverbWetMix = DEFAULT_WET_MIX;
+
+userHiPass[SETTING_HIPASS_FREQ] = DEFAULT_HIPASS_FREQ;
+userHiPass[SETTING_HIPASS_Q] = DEFAULT_HIPASS_Q;
+userLoPass[SETTING_LOPASS_FREQ] = DEFAULT_LOPASS_FREQ;
+userLoPass[SETTING_LOPASS_Q] = DEFAULT_LOPASS_Q;
 
 userADSR[SETTING_A] = msToS(DEFAULT_A);
 userADSR[SETTING_D] = msToS(DEFAULT_D);
@@ -72,14 +99,24 @@ var reverbWetGainNode = aCon.createGain();
 reverbWetGainNode.gain.value = DEFAULT_WET_MIX;
 reverbWetGainNode.connect(masterGainNode);
 
-
 var reverbBuffer = aCon.createBuffer(2, reverbData.left.length, aCon.sampleRate);
 reverbBuffer.copyToChannel(Float32Array.from(reverbData.left), 0, 0);
 reverbBuffer.copyToChannel(Float32Array.from(reverbData.right), 1, 0);
 
-var reverbNode = aCon.createConvolver();
-reverbNode.buffer = reverbBuffer;
-reverbNode.connect(reverbWetGainNode);
+var convolverNode = aCon.createConvolver();
+convolverNode.buffer = reverbBuffer;
+convolverNode.connect(reverbWetGainNode);
+
+var loPassFilterNode = aCon.createBiquadFilter();
+loPassFilterNode.frequency = DEFAULT_LOPASS_FREQ;
+loPassFilterNode.Q = DEFAULT_LOPASS_Q;
+loPassFilterNode.connect(convolverNode);
+loPassFilterNode.connect(reverbDryGainNode);
+
+var hiPassFilterNode = aCon.createBiquadFilter();
+loPassFilterNode.frequency = DEFAULT_HIPASS_FREQ;
+loPassFilterNode.Q = DEFAULT_LOPASS_Q;
+hiPassFilterNode.connect(loPassFilterNode);
 
 // midi functions
 function onMIDISuccess(midiAccess) {
@@ -147,8 +184,7 @@ function createVoice(note) {
     // gainNode.gain.linearRampToValueAtTime(sustainLevel, now + durationA + durationD);
 
     oscNode.connect(gainNode);
-    gainNode.connect(reverbNode);
-    gainNode.connect(reverbDryGainNode);
+    gainNode.connect(hiPassFilterNode);
 
     return  { "oscNode" : oscNode, "gainNode": gainNode };
 }
@@ -235,7 +271,7 @@ function onMIDIMessage(message) {
     // var type = data[0] & 0xf0;
     var note = data[1];
     var velocity = data[2];
-    // console.log("cmd, channel, note, velocity", cmd, channel, note, velocity);
+    console.log("cmd, channel, note, velocity", cmd, channel, note, velocity);
 
     var releasedKey = undefined;
 
@@ -255,15 +291,28 @@ function onMIDIMessage(message) {
         case CC_MESSAGE:
             if (ADSR_ASSIGNED_KNOBS.has(note)) {
                 userADSR[note] = velocity / 127;
-            } else if (note === SETTING_MASTER_VOLUME) {
-                userMasterVolume = velocity / 127;
-                console.log("userMasterVolume: ", userMasterVolume);
-                masterGainNode.gain.value = userMasterVolume;
+            // } else if (note === SETTING_MASTER_VOLUME) {
+            //     userMasterVolume = velocity / 127;
+            //     console.log("userMasterVolume: ", userMasterVolume);
+            //     masterGainNode.gain.value = userMasterVolume;
+            } else if (note === SETTING_S) {
+                if (velocity > 0) {
+                    userADSR[SETTING_S] = (userADSR[SETTING_S] === MIN_GAIN_LEVEL) ?
+                        MAX_GAIN_LEVEL : MIN_GAIN_LEVEL;
+                }
             } else if (note === SETTING_REVERB_WET_MIX) {
                 userReverbWetMix = velocity / 127;
                 console.log("userReverbWetMix: ", userReverbWetMix);
                 reverbDryGainNode.gain.value = 1 - userReverbWetMix;
                 reverbWetGainNode.gain.value = userReverbWetMix;
+            } else (note === SETTING_LOPASS_FREQ) {
+                userLoPass[SETTING_LOPASS_FREQ] = ;
+
+            } else (note === SETTING_LOPASS_Q) {
+
+            } else (note === SETTING_HIPASS_FREQ) {
+
+            } else (note === SETTING_HIPASS_Q) {
 
             }
     }
@@ -286,4 +335,6 @@ function readableNote(note) {
     var octave = parseInt(note / 12) - 1;
     return notes[note % 12] + octave.toString();
 }
+
+
 
