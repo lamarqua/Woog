@@ -29,7 +29,6 @@ const SETTING_LOPASS_Q = 4;
 
 const ADSR_ASSIGNED_KNOBS = new Set([SETTING_A, SETTING_D, SETTING_R]);
 
-
 const MIN_ENVELOP_TIME = 2;
 
 const MAX_A = 1000;
@@ -56,7 +55,7 @@ const DEFAULT_LOPASS_Q = 100;
 
 const DEFAULT_SUSTAIN = MAX_GAIN_LEVEL;
 
-const DEFAULT_MASTER_VOLUME = 0.9;
+const DEFAULT_MASTER_VOLUME = 1;
 
 const DEFAULT_WET_MIX = 1;
 
@@ -107,16 +106,20 @@ var convolverNode = aCon.createConvolver();
 convolverNode.buffer = reverbBuffer;
 convolverNode.connect(reverbWetGainNode);
 
+var hiPassFilterNode = aCon.createBiquadFilter();
+hiPassFilterNode.type = "highpass";
+hiPassFilterNode.frequency.value = DEFAULT_HIPASS_FREQ;
+hiPassFilterNode.Q.value = DEFAULT_HIPASS_Q;
+hiPassFilterNode.gain.value = 40;
+hiPassFilterNode.connect(hiPassFilterNode);
+
 var loPassFilterNode = aCon.createBiquadFilter();
-loPassFilterNode.frequency = DEFAULT_LOPASS_FREQ;
-loPassFilterNode.Q = DEFAULT_LOPASS_Q;
+loPassFilterNode.type = "lowpass";
+loPassFilterNode.frequency.value = DEFAULT_LOPASS_FREQ;
+loPassFilterNode.Q.value = DEFAULT_LOPASS_Q;
+loPassFilterNode.gain.value = 40;
 loPassFilterNode.connect(convolverNode);
 loPassFilterNode.connect(reverbDryGainNode);
-
-var hiPassFilterNode = aCon.createBiquadFilter();
-loPassFilterNode.frequency = DEFAULT_HIPASS_FREQ;
-loPassFilterNode.Q = DEFAULT_LOPASS_Q;
-hiPassFilterNode.connect(loPassFilterNode);
 
 // midi functions
 function onMIDISuccess(midiAccess) {
@@ -289,10 +292,11 @@ function onMIDIMessage(message) {
             console.log("KEY_RELEASED: gKeysPressed = ", gKeysPressed.map(readableNote));
             break;
         case CC_MESSAGE:
+            var velocityDiv = velocity / 127;
             if (ADSR_ASSIGNED_KNOBS.has(note)) {
-                userADSR[note] = velocity / 127;
+                userADSR[note] = velocityDiv;
             // } else if (note === SETTING_MASTER_VOLUME) {
-            //     userMasterVolume = velocity / 127;
+            //     userMasterVolume = velocityDiv;
             //     console.log("userMasterVolume: ", userMasterVolume);
             //     masterGainNode.gain.value = userMasterVolume;
             } else if (note === SETTING_S) {
@@ -301,18 +305,30 @@ function onMIDIMessage(message) {
                         MAX_GAIN_LEVEL : MIN_GAIN_LEVEL;
                 }
             } else if (note === SETTING_REVERB_WET_MIX) {
-                userReverbWetMix = velocity / 127;
+                userReverbWetMix = velocityDiv;
                 console.log("userReverbWetMix: ", userReverbWetMix);
                 reverbDryGainNode.gain.value = 1 - userReverbWetMix;
                 reverbWetGainNode.gain.value = userReverbWetMix;
-            } else (note === SETTING_LOPASS_FREQ) {
-                userLoPass[SETTING_LOPASS_FREQ] = ;
 
-            } else (note === SETTING_LOPASS_Q) {
+            } else if (note === SETTING_HIPASS_FREQ) {
+                userLoPass[SETTING_HIPASS_FREQ] = (MAX_HIPASS_FREQ - MIN_HIPASS_FREQ) * velocityDiv + MIN_HIPASS_FREQ;
+                hiPassFilterNode.frequency.value = userHiPass[SETTING_HIPASS_FREQ];
+                console.log("userHiPassFreq: ", userLoPass[SETTING_HIPASS_FREQ]);
 
-            } else (note === SETTING_HIPASS_FREQ) {
+            } else if (note === SETTING_HIPASS_Q) {
+                userHiPass[SETTING_HIPASS_Q] = (range = MAX_FILTER_Q - MIN_FILTER_Q) * velocityDiv + MIN_FILTER_Q;
+                hiPassFilterNode.Q.value = userHiPass[SETTING_HIPASS_Q];
+                console.log("userHiPassQ: ", userHiPass[SETTING_HIPASS_Q]);
 
-            } else (note === SETTING_HIPASS_Q) {
+            } else if (note === SETTING_LOPASS_FREQ) {  
+                userLoPass[SETTING_LOPASS_FREQ] = (MAX_LOPASS_FREQ - MIN_LOPASS_FREQ) * velocityDiv + MIN_LOPASS_FREQ;
+                loPassFilterNode.frequency.value = userLoPass[SETTING_LOPASS_FREQ];
+                console.log("userLoPassFreq: ", userLoPass[SETTING_LOPASS_FREQ]);
+
+            } else if (note === SETTING_LOPASS_Q) {
+                userLoPass[SETTING_LOPASS_Q] = (MAX_FILTER_Q - MIN_FILTER_Q) * velocityDiv + MIN_FILTER_Q;
+                loPassFilterNode.Q.value = userLoPass[SETTING_LOPASS_Q];
+                console.log("userLoPassQ: ", userLoPass[SETTING_LOPASS_Q]);
 
             }
     }
