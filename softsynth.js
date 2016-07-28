@@ -57,13 +57,13 @@ const DEFAULT_HIPASS_Q = 1;
 const DEFAULT_LOPASS_FREQ = MAX_LOPASS_FREQ;
 const DEFAULT_LOPASS_Q = 1;
 
-const DEFAULT_LFO_FREQ = 10;
+const DEFAULT_LFO_FREQ = 0.001;
 
 const DEFAULT_SUSTAIN = MAX_GAIN_LEVEL;
 
 const DEFAULT_MASTER_VOLUME = 0.99;
 
-const DEFAULT_WET_MIX = 1;
+const DEFAULT_WET_MIX = 0;
 
 var midi, reverbData, gKeysPressed = [], gVoices = {};
 var userADSR = [], userHiPass = [], userLoPass = [], userLFO = [], userMasterVolume = DEFAULT_MASTER_VOLUME, userReverbWetMix = DEFAULT_WET_MIX;
@@ -135,7 +135,7 @@ oscConnectNode.connect(loPassFilterNode);
 
 var LFONode = aCon.createOscillator();
 LFONode.type = "sine";
-LFONode.frequency.value = 20;
+LFONode.frequency.value = DEFAULT_LFO_FREQ;
 LFONode.start();
 LFONode.connect(oscConnectNode.gain);
 
