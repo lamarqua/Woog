@@ -38,20 +38,20 @@ const DEFAULT_A = MIN_ENVELOP_TIME;
 const DEFAULT_D = 500;
 const DEFAULT_R = 500;
 
-const MIN_HIPASS_FREQ = 10;
-const MAX_HIPASS_FREQ = 6000;
+const MIN_HIPASS_FREQ = 1000;
+const MAX_HIPASS_FREQ = 14000;
 
-const MIN_LOPASS_FREQ = 10;
-const MAX_LOPASS_FREQ = 6000;
+const MIN_LOPASS_FREQ = 80;
+const MAX_LOPASS_FREQ = 10000;
 
 const MIN_FILTER_Q = .0001;
 const MAX_FILTER_Q = 1000;
 
 const DEFAULT_HIPASS_FREQ = MIN_HIPASS_FREQ;
-const DEFAULT_HIPASS_Q = .0001;
+const DEFAULT_HIPASS_Q = 1;
 
 const DEFAULT_LOPASS_FREQ = MAX_LOPASS_FREQ;
-const DEFAULT_LOPASS_Q = .0001;
+const DEFAULT_LOPASS_Q = 1;
 
 const DEFAULT_SUSTAIN = MAX_GAIN_LEVEL;
 
@@ -317,7 +317,7 @@ function onMIDIMessage(message) {
 
             } else if (note === SETTING_HIPASS_Q) {
                 userHiPass[SETTING_HIPASS_Q] = (MAX_FILTER_Q - MIN_FILTER_Q) * velocityDiv + MIN_FILTER_Q;
-                hiPassFilterNode.Q.value = userHiPass[SETTING_HIPASS_Q];
+                // hiPassFilterNode.Q.value = userHiPass[SETTING_HIPASS_Q];
                 console.log("userHiPassQ: ", userHiPass[SETTING_HIPASS_Q]);
 
             } else if (note === SETTING_LOPASS_FREQ) {  
@@ -327,7 +327,7 @@ function onMIDIMessage(message) {
 
             } else if (note === SETTING_LOPASS_Q) {
                 userLoPass[SETTING_LOPASS_Q] = (MAX_FILTER_Q - MIN_FILTER_Q) * velocityDiv + MIN_FILTER_Q;
-                loPassFilterNode.Q.value = userLoPass[SETTING_LOPASS_Q];
+                // loPassFilterNode.Q.value = userLoPass[SETTING_LOPASS_Q];
                 console.log("userLoPassQ: ", userLoPass[SETTING_LOPASS_Q]);
 
             }
