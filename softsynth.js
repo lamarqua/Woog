@@ -38,24 +38,24 @@ const DEFAULT_A = MIN_ENVELOP_TIME;
 const DEFAULT_D = 500;
 const DEFAULT_R = 500;
 
-const MIN_HIPASS_FREQ = 0;
-const MAX_HIPASS_FREQ = 2000;
+const MIN_HIPASS_FREQ = 10;
+const MAX_HIPASS_FREQ = 6000;
 
-const MIN_LOPASS_FREQ = 500;
+const MIN_LOPASS_FREQ = 10;
 const MAX_LOPASS_FREQ = 6000;
 
 const MIN_FILTER_Q = .0001;
 const MAX_FILTER_Q = 1000;
 
 const DEFAULT_HIPASS_FREQ = MIN_HIPASS_FREQ;
-const DEFAULT_HIPASS_Q = 100;
+const DEFAULT_HIPASS_Q = .0001;
 
 const DEFAULT_LOPASS_FREQ = MAX_LOPASS_FREQ;
-const DEFAULT_LOPASS_Q = 100;
+const DEFAULT_LOPASS_Q = .0001;
 
 const DEFAULT_SUSTAIN = MAX_GAIN_LEVEL;
 
-const DEFAULT_MASTER_VOLUME = 1;
+const DEFAULT_MASTER_VOLUME = 0.99;
 
 const DEFAULT_WET_MIX = 1;
 
@@ -106,20 +106,20 @@ var convolverNode = aCon.createConvolver();
 convolverNode.buffer = reverbBuffer;
 convolverNode.connect(reverbWetGainNode);
 
-var hiPassFilterNode = aCon.createBiquadFilter();
-hiPassFilterNode.type = "highpass";
-hiPassFilterNode.frequency.value = DEFAULT_HIPASS_FREQ;
-hiPassFilterNode.Q.value = DEFAULT_HIPASS_Q;
-hiPassFilterNode.gain.value = 40;
-hiPassFilterNode.connect(hiPassFilterNode);
-
 var loPassFilterNode = aCon.createBiquadFilter();
 loPassFilterNode.type = "lowpass";
 loPassFilterNode.frequency.value = DEFAULT_LOPASS_FREQ;
 loPassFilterNode.Q.value = DEFAULT_LOPASS_Q;
-loPassFilterNode.gain.value = 40;
+loPassFilterNode.gain.value = 0;
 loPassFilterNode.connect(convolverNode);
 loPassFilterNode.connect(reverbDryGainNode);
+
+var hiPassFilterNode = aCon.createBiquadFilter();
+hiPassFilterNode.type = "highpass";
+hiPassFilterNode.frequency.value = DEFAULT_HIPASS_FREQ;
+hiPassFilterNode.Q.value = DEFAULT_HIPASS_Q;
+hiPassFilterNode.gain.value = 0;
+hiPassFilterNode.connect(loPassFilterNode);
 
 // midi functions
 function onMIDISuccess(midiAccess) {
@@ -311,12 +311,12 @@ function onMIDIMessage(message) {
                 reverbWetGainNode.gain.value = userReverbWetMix;
 
             } else if (note === SETTING_HIPASS_FREQ) {
-                userLoPass[SETTING_HIPASS_FREQ] = (MAX_HIPASS_FREQ - MIN_HIPASS_FREQ) * velocityDiv + MIN_HIPASS_FREQ;
+                userHiPass[SETTING_HIPASS_FREQ] = (MAX_HIPASS_FREQ - MIN_HIPASS_FREQ) * velocityDiv + MIN_HIPASS_FREQ;
                 hiPassFilterNode.frequency.value = userHiPass[SETTING_HIPASS_FREQ];
-                console.log("userHiPassFreq: ", userLoPass[SETTING_HIPASS_FREQ]);
+                console.log("userHiPassFreq: ", userHiPass[SETTING_HIPASS_FREQ]);
 
             } else if (note === SETTING_HIPASS_Q) {
-                userHiPass[SETTING_HIPASS_Q] = (range = MAX_FILTER_Q - MIN_FILTER_Q) * velocityDiv + MIN_FILTER_Q;
+                userHiPass[SETTING_HIPASS_Q] = (MAX_FILTER_Q - MIN_FILTER_Q) * velocityDiv + MIN_FILTER_Q;
                 hiPassFilterNode.Q.value = userHiPass[SETTING_HIPASS_Q];
                 console.log("userHiPassQ: ", userHiPass[SETTING_HIPASS_Q]);
 
