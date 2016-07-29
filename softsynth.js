@@ -27,6 +27,7 @@ const SETTING_REVERB_WET_MIX = 8;
 const SETTING_LOPASS_FREQ = 3;
 const SETTING_LOPASS_Q = 4;
 const SETTING_LFO_FREQ = 1;
+const SETTING_BITCRUSHER = 2;
 
 const ADSR_ASSIGNED_KNOBS = new Set([SETTING_A, SETTING_D, SETTING_R]);
 
@@ -65,6 +66,9 @@ const DEFAULT_MASTER_VOLUME = 0.99;
 
 const DEFAULT_WET_MIX = 0;
 
+var bitcrusherValues = [1, 2, 4, 8, 16, 32, 64];
+var bitcrusherCurrentValue = 0;
+
 var midi, reverbData, gKeysPressed = [], gVoices = {};
 var userADSR = [], userHiPass = [], userLoPass = [], userLFO = [], userMasterVolume = DEFAULT_MASTER_VOLUME, userReverbWetMix = DEFAULT_WET_MIX;
 
@@ -89,6 +93,7 @@ if (navigator.requestMIDIAccess) {
     }).then(onMIDISuccess, onMIDIFailure);
 } else {
     alert("No MIDI support in your browser.");
+
 }
 
 // Create audio context
@@ -119,8 +124,8 @@ loPassFilterNode.type = "lowpass";
 loPassFilterNode.frequency.value = DEFAULT_LOPASS_FREQ;
 loPassFilterNode.Q.value = DEFAULT_LOPASS_Q;
 loPassFilterNode.gain.value = 0;
-loPassFilterNode.connect(convolverNode);
-loPassFilterNode.connect(reverbDryGainNode);
+// loPassFilterNode.connect(convolverNode);
+// loPassFilterNode.connect(reverbDryGainNode);
 
 var oscConnectNode = aCon.createGain();
 oscConnectNode.gain.value = userMasterVolume;
@@ -138,6 +143,47 @@ LFONode.type = "sine";
 LFONode.frequency.value = DEFAULT_LFO_FREQ;
 LFONode.start();
 LFONode.connect(oscConnectNode.gain);
+
+var bitCrusherNode = aCon.createScriptProcessor(2048, 1, 1);
+loPassFilterNode.connect(bitCrusherNode);
+
+bitCrusherNode.connect(convolverNode);
+bitCrusherNode.connect(reverbDryGainNode);
+bitCrusherNode.onaudioprocess = function(audioProcessingEvent) {
+    // The input buffer is the song we loaded earlier
+    var inputBuffer = audioProcessingEvent.inputBuffer;
+
+    // The output buffer contains the samples that will be modified and played
+    var outputBuffer = audioProcessingEvent.outputBuffer;
+
+    // Loop through the output channels (in this case there is only one)
+    for (var channel = 0; channel < outputBuffer.numberOfChannels; channel++) {
+        var inputData = inputBuffer.getChannelData(channel);
+        var outputData = outputBuffer.getChannelData(channel);
+
+        var reductionFactor = bitcrusherValues[bitcrusherCurrentValue];
+        for (var sample = 0; sample < inputBuffer.length; sample += reductionFactor) {
+            var sum = 0.0;
+            for (var i = 0; i < reductionFactor; ++i) {
+                sum += inputData[sample + i];
+            }
+
+
+            sum /= reductionFactor;
+            // sum = quantizeResolution(sum, 8);
+            for (var i = 0; i < reductionFactor; ++i) {
+                outputData[sample + i] = sum;
+            }
+        }
+    }
+}
+
+function quantizeResolution(val, nbits) {
+    target = 1 << nbits;
+    // if (Math.random() < 0.01) console.log(res);
+    res = Math.round(val * target)  / target;
+    return res;
+}
 
 // midi functions
 function onMIDISuccess(midiAccess) {
@@ -327,6 +373,12 @@ function onMIDIMessage(message) {
                 console.log("userReverbWetMix: ", userReverbWetMix);
                 reverbDryGainNode.gain.value = 1 - userReverbWetMix;
                 reverbWetGainNode.gain.value = userReverbWetMix;
+            } else if (note === SETTING_BITCRUSHER) {
+                if (velocity > 0) {
+                    bitcrusherCurrentValue = (bitcrusherCurrentValue + 1) % bitcrusherValues.length;
+                    console.log(bitcrusherCurrentValue);
+                }
+
             } else if (note === SETTING_LFO_FREQ) {
                 userLFO[SETTING_LFO_FREQ] = (MAX_LFO_FREQ - MIN_LFO_FREQ) * velocityDiv + MIN_LFO_FREQ;
                 LFONode.frequency.value = userLFO[SETTING_LFO_FREQ];
