@@ -22,10 +22,12 @@ const SETTING_A = 5;
 const SETTING_D = 6;
 const SETTING_R = 7;
 const SETTING_REVERB_WET_MIX = 8;
-const SETTING_HIPASS_FREQ = 1;
-const SETTING_HIPASS_Q = 2;
+//const SETTING_HIPASS_FREQ = 1;
+//const SETTING_HIPASS_Q = 2;
 const SETTING_LOPASS_FREQ = 3;
 const SETTING_LOPASS_Q = 4;
+const SETTING_LFO_FREQ = 1;
+const SETTING_BITCRUSHER = 2;
 
 const ADSR_ASSIGNED_KNOBS = new Set([SETTING_A, SETTING_D, SETTING_R]);
 
@@ -47,25 +49,35 @@ const MAX_LOPASS_FREQ = 10000;
 const MIN_FILTER_Q = .0001;
 const MAX_FILTER_Q = 1000;
 
+const MIN_LFO_FREQ = 0.001;
+const MAX_LFO_FREQ = 30;
+
 const DEFAULT_HIPASS_FREQ = MIN_HIPASS_FREQ;
 const DEFAULT_HIPASS_Q = 1;
 
 const DEFAULT_LOPASS_FREQ = MAX_LOPASS_FREQ;
 const DEFAULT_LOPASS_Q = 1;
 
+const DEFAULT_LFO_FREQ = 0.001;
+
 const DEFAULT_SUSTAIN = MAX_GAIN_LEVEL;
 
 const DEFAULT_MASTER_VOLUME = 0.99;
 
-const DEFAULT_WET_MIX = 1;
+const DEFAULT_WET_MIX = 0;
+
+var bitcrusherValues = [1, 2, 4, 8, 16, 32, 64];
+var bitcrusherCurrentValue = 0;
 
 var midi, reverbData, gKeysPressed = [], gVoices = {};
-var userADSR = [], userHiPass = [], userLoPass = [], userMasterVolume = DEFAULT_MASTER_VOLUME, userReverbWetMix = DEFAULT_WET_MIX;
+var userADSR = [], userHiPass = [], userLoPass = [], userLFO = [], userMasterVolume = DEFAULT_MASTER_VOLUME, userReverbWetMix = DEFAULT_WET_MIX;
 
-userHiPass[SETTING_HIPASS_FREQ] = DEFAULT_HIPASS_FREQ;
-userHiPass[SETTING_HIPASS_Q] = DEFAULT_HIPASS_Q;
+// userHiPass[SETTING_HIPASS_FREQ] = DEFAULT_HIPASS_FREQ;
+// userHiPass[SETTING_HIPASS_Q] = DEFAULT_HIPASS_Q;
 userLoPass[SETTING_LOPASS_FREQ] = DEFAULT_LOPASS_FREQ;
 userLoPass[SETTING_LOPASS_Q] = DEFAULT_LOPASS_Q;
+
+userLFO[SETTING_LFO_FREQ] = DEFAULT_LFO_FREQ;
 
 userADSR[SETTING_A] = msToS(DEFAULT_A);
 userADSR[SETTING_D] = msToS(DEFAULT_D);
@@ -81,6 +93,7 @@ if (navigator.requestMIDIAccess) {
     }).then(onMIDISuccess, onMIDIFailure);
 } else {
     alert("No MIDI support in your browser.");
+
 }
 
 // Create audio context
@@ -111,15 +124,66 @@ loPassFilterNode.type = "lowpass";
 loPassFilterNode.frequency.value = DEFAULT_LOPASS_FREQ;
 loPassFilterNode.Q.value = DEFAULT_LOPASS_Q;
 loPassFilterNode.gain.value = 0;
-loPassFilterNode.connect(convolverNode);
-loPassFilterNode.connect(reverbDryGainNode);
+// loPassFilterNode.connect(convolverNode);
+// loPassFilterNode.connect(reverbDryGainNode);
 
-var hiPassFilterNode = aCon.createBiquadFilter();
-hiPassFilterNode.type = "highpass";
-hiPassFilterNode.frequency.value = DEFAULT_HIPASS_FREQ;
-hiPassFilterNode.Q.value = DEFAULT_HIPASS_Q;
-hiPassFilterNode.gain.value = 0;
-hiPassFilterNode.connect(loPassFilterNode);
+var oscConnectNode = aCon.createGain();
+oscConnectNode.gain.value = userMasterVolume;
+oscConnectNode.connect(loPassFilterNode);
+
+// var hiPassFilterNode = aCon.createBiquadFilter();
+// hiPassFilterNode.type = "highpass";
+// hiPassFilterNode.frequency.value = DEFAULT_HIPASS_FREQ;
+// hiPassFilterNode.Q.value = DEFAULT_HIPASS_Q;
+// hiPassFilterNode.gain.value = 0;
+// hiPassFilterNode.connect(loPassFilterNode);
+
+var LFONode = aCon.createOscillator();
+LFONode.type = "sine";
+LFONode.frequency.value = DEFAULT_LFO_FREQ;
+LFONode.start();
+LFONode.connect(oscConnectNode.gain);
+
+var bitCrusherNode = aCon.createScriptProcessor(2048, 1, 1);
+loPassFilterNode.connect(bitCrusherNode);
+
+bitCrusherNode.connect(convolverNode);
+bitCrusherNode.connect(reverbDryGainNode);
+bitCrusherNode.onaudioprocess = function(audioProcessingEvent) {
+    // The input buffer is the song we loaded earlier
+    var inputBuffer = audioProcessingEvent.inputBuffer;
+
+    // The output buffer contains the samples that will be modified and played
+    var outputBuffer = audioProcessingEvent.outputBuffer;
+
+    // Loop through the output channels (in this case there is only one)
+    for (var channel = 0; channel < outputBuffer.numberOfChannels; channel++) {
+        var inputData = inputBuffer.getChannelData(channel);
+        var outputData = outputBuffer.getChannelData(channel);
+
+        var reductionFactor = bitcrusherValues[bitcrusherCurrentValue];
+        for (var sample = 0; sample < inputBuffer.length; sample += reductionFactor) {
+            var sum = 0.0;
+            for (var i = 0; i < reductionFactor; ++i) {
+                sum += inputData[sample + i];
+            }
+
+
+            sum /= reductionFactor;
+            // sum = quantizeResolution(sum, 8);
+            for (var i = 0; i < reductionFactor; ++i) {
+                outputData[sample + i] = sum;
+            }
+        }
+    }
+}
+
+function quantizeResolution(val, nbits) {
+    target = 1 << nbits;
+    // if (Math.random() < 0.01) console.log(res);
+    res = Math.round(val * target)  / target;
+    return res;
+}
 
 // midi functions
 function onMIDISuccess(midiAccess) {
@@ -187,7 +251,7 @@ function createVoice(note) {
     // gainNode.gain.linearRampToValueAtTime(sustainLevel, now + durationA + durationD);
 
     oscNode.connect(gainNode);
-    gainNode.connect(hiPassFilterNode);
+    gainNode.connect(oscConnectNode);
 
     return  { "oscNode" : oscNode, "gainNode": gainNode };
 }
@@ -309,16 +373,16 @@ function onMIDIMessage(message) {
                 console.log("userReverbWetMix: ", userReverbWetMix);
                 reverbDryGainNode.gain.value = 1 - userReverbWetMix;
                 reverbWetGainNode.gain.value = userReverbWetMix;
+            } else if (note === SETTING_BITCRUSHER) {
+                if (velocity > 0) {
+                    bitcrusherCurrentValue = (bitcrusherCurrentValue + 1) % bitcrusherValues.length;
+                    console.log(bitcrusherCurrentValue);
+                }
 
-            } else if (note === SETTING_HIPASS_FREQ) {
-                userHiPass[SETTING_HIPASS_FREQ] = (MAX_HIPASS_FREQ - MIN_HIPASS_FREQ) * velocityDiv + MIN_HIPASS_FREQ;
-                hiPassFilterNode.frequency.value = userHiPass[SETTING_HIPASS_FREQ];
-                console.log("userHiPassFreq: ", userHiPass[SETTING_HIPASS_FREQ]);
-
-            } else if (note === SETTING_HIPASS_Q) {
-                userHiPass[SETTING_HIPASS_Q] = (MAX_FILTER_Q - MIN_FILTER_Q) * velocityDiv + MIN_FILTER_Q;
-                // hiPassFilterNode.Q.value = userHiPass[SETTING_HIPASS_Q];
-                console.log("userHiPassQ: ", userHiPass[SETTING_HIPASS_Q]);
+            } else if (note === SETTING_LFO_FREQ) {
+                userLFO[SETTING_LFO_FREQ] = (MAX_LFO_FREQ - MIN_LFO_FREQ) * velocityDiv + MIN_LFO_FREQ;
+                LFONode.frequency.value = userLFO[SETTING_LFO_FREQ];
+                console.log("userLFOFreq: ", userLFO[SETTING_LFO_FREQ]);
 
             } else if (note === SETTING_LOPASS_FREQ) {
                 userLoPass[SETTING_LOPASS_FREQ] = (MAX_LOPASS_FREQ - MIN_LOPASS_FREQ) * velocityDiv + MIN_LOPASS_FREQ;
@@ -329,8 +393,16 @@ function onMIDIMessage(message) {
                 userLoPass[SETTING_LOPASS_Q] = (MAX_FILTER_Q - MIN_FILTER_Q) * velocityDiv + MIN_FILTER_Q;
                 // loPassFilterNode.Q.value = userLoPass[SETTING_LOPASS_Q];
                 console.log("userLoPassQ: ", userLoPass[SETTING_LOPASS_Q]);
-
             }
+            // } else if (note === SETTING_HIPASS_FREQ) {
+            //     userHiPass[SETTING_HIPASS_FREQ] = (MAX_HIPASS_FREQ - MIN_HIPASS_FREQ) * velocityDiv + MIN_HIPASS_FREQ;
+            //     hiPassFilterNode.frequency.value = userHiPass[SETTING_HIPASS_FREQ];
+            //     console.log("userHiPassFreq: ", userHiPass[SETTING_HIPASS_FREQ]);
+
+            // } else if (note === SETTING_HIPASS_Q) {
+            //     userHiPass[SETTING_HIPASS_Q] = (MAX_FILTER_Q - MIN_FILTER_Q) * velocityDiv + MIN_FILTER_Q;
+            //     // hiPassFilterNode.Q.value = userHiPass[SETTING_HIPASS_Q];
+            //     console.log("userHiPassQ: ", userHiPass[SETTING_HIPASS_Q]);
     }
 
     if (cmd === KEY_PRESSED || cmd === KEY_RELEASED) {
