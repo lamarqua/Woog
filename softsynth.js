@@ -10,7 +10,7 @@ const A4_FREQ = 440;
 const A4_MIDI_NUMBER = 69;
 
 const MAX_VOICES = 4;
-const OSC_TYPE = "sawtooth";
+const OSC_TYPE = "triangle";
 
 const MIN_GAIN_LEVEL = 0.0;
 const MAX_GAIN_LEVEL = 0.999;
@@ -320,7 +320,7 @@ function onMIDIMessage(message) {
                 // hiPassFilterNode.Q.value = userHiPass[SETTING_HIPASS_Q];
                 console.log("userHiPassQ: ", userHiPass[SETTING_HIPASS_Q]);
 
-            } else if (note === SETTING_LOPASS_FREQ) {  
+            } else if (note === SETTING_LOPASS_FREQ) {
                 userLoPass[SETTING_LOPASS_FREQ] = (MAX_LOPASS_FREQ - MIN_LOPASS_FREQ) * velocityDiv + MIN_LOPASS_FREQ;
                 loPassFilterNode.frequency.value = userLoPass[SETTING_LOPASS_FREQ];
                 console.log("userLoPassFreq: ", userLoPass[SETTING_LOPASS_FREQ]);
