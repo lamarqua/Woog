@@ -21,6 +21,10 @@ TODO.txt
  * BitCrushing
 
 
+ * handle case where we want to disable LFO
+ *
+
+
 - Architecture and code
  * investigate Flow
  * architecture: create higher level objects such as Envelopes, ReverbNodeWithMix, MultiOscillator, etc... And how for example LFO node and Envelope node would have the same interface
