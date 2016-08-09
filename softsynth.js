@@ -2,11 +2,6 @@
 (function() {
 "use strict";
 
-const MIDI_KEY_PRESSED = 9;
-const MIDI_KEY_RELEASED = 8;
-const MIDI_CC_MESSAGE = 11;
-const MIDI_PC_MESSAGE = 12;
-
 const BINDING_S = 9;
 const BINDING_A = 5;
 const BINDING_D = 6;
@@ -52,13 +47,10 @@ const DEFAULT_LFO_FREQ = 0.001; // FIXME
 const MIN_LFO_FREQ = DEFAULT_LFO_FREQ;
 const MAX_LFO_FREQ = 30;
 
-
 const BITCRUSHER_VALUES = [1, 2, 4, 8, 16, 32, 64];
-
 
 let bitcrusherCurrentValue = 0;
 
-let midi, gKeysPressed = [], gVoices = {};
 let userADSR = [], userHiPass = [], userLoPass = [], userLFO = [], userMasterVolume = DEFAULT_MASTER_VOLUME, userReverbWetMix = DEFAULT_WET_MIX;
 
 userLoPass[BINDING_LOPASS_FREQ] = DEFAULT_LOPASS_FREQ;
@@ -72,16 +64,219 @@ userADSR[BINDING_R] = msToS(DEFAULT_R);
 
 userADSR[BINDING_S] = DEFAULT_SUSTAIN;
 
-// Initialization code
-// request MIDI access
-if (navigator.requestMIDIAccess) {
-    navigator.requestMIDIAccess({
-        sysex: false
-    }).then(onMIDISuccess, onMIDIFailure);
-} else {
-    alert("No MIDI support in your browser.");
+function createInputDevice() {
+    const MIDI_KEY_PRESSED = 9;
+    const MIDI_KEY_RELEASED = 8;
+    const MIDI_CC_MESSAGE = 11;
+    const MIDI_PC_MESSAGE = 12;
 
+    // TODO: inputDevice should have a proper flow type
+    let inputDevice = { keysPressed: [], setSynth: undefined, initializeMIDI: undefined,
+        synth: undefined, midi: undefined };
+
+    inputDevice.setSynth = function(synthObject) {
+        inputDevice.synth = synthObject;
+    }
+
+    let _onMIDIMessage = function(message) {
+        if (inputDevice.synth) {
+            let data = message.data;
+            let cmd = data[0] >> 4;
+            let channel = data[0] & 0xf;
+            let note = data[1];
+            let velocity = data[2];
+            console.log("cmd, channel, note, velocity", cmd, channel, note, velocity);
+
+            switch (cmd) {
+                case MIDI_KEY_PRESSED:
+                    inputDevice.keysPressed.push(note);
+
+                    // $FlowIgnore: TODO add proper type for inputDevice.synth
+                    inputDevice.synth.onKey("KeyPressed", inputDevice.keysPressed, note, velocity);
+                    break;
+                case MIDI_KEY_RELEASED:
+                    let i = inputDevice.keysPressed.indexOf(note);
+                    if (i > -1) {
+                        inputDevice.keysPressed.splice(i, 1);
+                    }
+
+                    // $FlowIgnore: TODO add proper type for inputDevice.synth
+                    inputDevice.synth.onKey("KeyReleased", inputDevice.keysPressed, note, velocity);
+                    break;
+                case MIDI_CC_MESSAGE:
+                    // $FlowIgnore: TODO add proper type for inputDevice.synth
+                    inputDevice.synth.onMessage("CCMessage", note, velocity);
+                    break;
+                case MIDI_PC_MESSAGE:
+                    // $FlowIgnore: TODO add proper type for inputDevice.synth
+                    inputDevice.synth.onMessage("PCMessage", note, velocity);
+                    break;
+            }
+        }
+    }
+
+    inputDevice.initializeMIDI = function() {
+        if (!inputDevice.synth) {
+            console.log("Initialize a synth before calling InitializeMIDI()");
+        } else {
+            // request MIDI access
+            if (navigator.requestMIDIAccess) {
+                navigator.requestMIDIAccess({
+                    sysex: false
+                }).then(onMIDISuccess, onMIDIFailure);
+            }
+
+            // midi functions
+            function onMIDISuccess(midiAccess) {
+                // when we get a succesful response, run this code
+                inputDevice.midi = midiAccess; // this is our raw MIDI rdata, inputs, outputs, and sysex status
+
+                let inputs = inputDevice.midi.inputs.values();
+                // loop over all available inputs and listen for any MIDI input
+                for (let input = inputs.next(); input && !input.done; input = inputs.next()) {
+                    // each time there is a midi message call the onMIDIMessage function
+                    input.value.onmidimessage = _onMIDIMessage;
+                }
+            }
+
+            function onMIDIFailure(error) {
+            // when we get a failed response, run this code
+                console.log("No access to MIDI devices or your browser doesn't support WebMIDI API. Please use WebMIDIAPIShim " + error);
+            }
+
+        }
+    }
+
+    return inputDevice;
 }
+
+function createSynth() {
+    function _frequencyFromNote(note) {
+        const A4_FREQ = 440;
+        const A4_MIDI_NUMBER = 69;
+
+        return A4_FREQ * Math.pow(2, (note - A4_MIDI_NUMBER) / 12);
+    }
+
+    function _readableNote(note) {
+        let notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+        let octave = parseInt(note / 12) - 1;
+        return notes[note % 12] + octave.toString();
+    }
+
+    let synth = { voices: {}, onKey: undefined, onMessage: undefined, allocateVoices: undefined };
+
+
+    synth.onKey = function(eventType, keysPressed, note, velocity) {
+        if (eventType === "KeyPressed") {
+
+        } else if (eventType === "KeyReleased") {
+
+        }
+
+        reclaimVoices(synth.voices, keysPressed);
+
+        if (keysPressed.length > 0) {
+            synth.allocateVoices(keysPressed);
+        }
+    }
+
+    synth.allocateVoices = function(notes) {
+        let highestPriorityNotes = getHighestPriorityNotes(notes);
+        console.log("highestPriorityNotes", highestPriorityNotes);
+
+        let allocatedNotes = Object.keys(synth.voices);
+        allocatedNotes = allocatedNotes.map(function(x) { return +x; });
+
+        let noteToStealFrom = undefined;
+        for (let i = 0; i < allocatedNotes.length; ++i) {
+
+            let idx = highestPriorityNotes.indexOf(allocatedNotes[i]);
+            if (idx === -1) {
+                noteToStealFrom = allocatedNotes[i];
+                break;
+            } else {
+                console.log("Found allocatedNote", allocatedNotes[i], " at index i ", idx, " val =  ", highestPriorityNotes[idx]);
+            }
+        }
+
+        let noteToAllocate = undefined;
+
+        for (let i = 0; i < highestPriorityNotes.length; ++i) {
+            if (!(highestPriorityNotes[i] in synth.voices)) {
+                noteToAllocate = highestPriorityNotes[i];
+                break;
+            }
+        }
+
+        if (noteToAllocate) {
+            console.log("noteToAllocate:", noteToAllocate);
+
+            if (noteToStealFrom) {
+                killNote(synth.voices, noteToStealFrom);
+            }
+            synth.voices[noteToAllocate] = createVoice(noteToAllocate);
+        }
+    }
+
+
+    synth.onMessage = function(eventType, note, velocity) {
+        if (eventType === "CCMessage") {
+            let velocityDiv = velocity / 127;
+            if (BINDINGS_ADS.has(note)) {
+                userADSR[note] = velocityDiv;
+            // } else if (note === BINDING_MASTER_VOLUME) {
+            //     userMasterVolume = velocityDiv;
+            //     console.log("userMasterVolume: ", userMasterVolume);
+            //     masterGainNode.gain.value = userMasterVolume;
+            } else if (note === BINDING_S) {
+                if (velocity > 0) {
+                    userADSR[BINDING_S] = (userADSR[BINDING_S] === MIN_GAIN_LEVEL) ?
+                        MAX_GAIN_LEVEL : MIN_GAIN_LEVEL;
+                }
+            } else if (note === BINDING_REVERB_WET_MIX) {
+                userReverbWetMix = velocityDiv;
+                console.log("userReverbWetMix: ", userReverbWetMix);
+                reverbDryGainNode.gain.value = 1 - userReverbWetMix;
+                reverbWetGainNode.gain.value = userReverbWetMix;
+            } else if (note === BINDING_BITCRUSHER) {
+                if (velocity > 0) {
+                    bitcrusherCurrentValue = (bitcrusherCurrentValue + 1) % BITCRUSHER_VALUES.length;
+                    console.log(bitcrusherCurrentValue);
+                }
+
+            } else if (note === BINDING_LFO_FREQ) {
+                userLFO[BINDING_LFO_FREQ] = (MAX_LFO_FREQ - MIN_LFO_FREQ) * velocityDiv + MIN_LFO_FREQ;
+                LFONode.frequency.value = userLFO[BINDING_LFO_FREQ];
+                console.log("userLFOFreq: ", userLFO[BINDING_LFO_FREQ]);
+
+            } else if (note === BINDING_LOPASS_FREQ) {
+                userLoPass[BINDING_LOPASS_FREQ] = (MAX_LOPASS_FREQ - MIN_LOPASS_FREQ) * velocityDiv + MIN_LOPASS_FREQ;
+                loPassFilterNode.frequency.value = userLoPass[BINDING_LOPASS_FREQ];
+                console.log("userLoPassFreq: ", userLoPass[BINDING_LOPASS_FREQ]);
+
+            } else if (note === BINDING_LOPASS_Q) {
+                userLoPass[BINDING_LOPASS_Q] = (MAX_FILTER_Q - MIN_FILTER_Q) * velocityDiv + MIN_FILTER_Q;
+                // loPassFilterNode.Q.value = userLoPass[BINDING_LOPASS_Q];
+                console.log("userLoPassQ: ", userLoPass[BINDING_LOPASS_Q]);
+            }
+        } else if (eventType === "PCMessage") {
+
+        }
+    }
+
+    return synth;
+}
+
+
+//
+let synth = createSynth();
+let inputDevice = createInputDevice();
+
+inputDevice.setSynth(synth);
+inputDevice.initializeMIDI();
+
+//
 
 // Create audio context
 let aCon = new AudioContext();
@@ -166,23 +361,6 @@ function quantizeResolution(val, nbits) {
     return res;
 }
 
-// midi functions
-function onMIDISuccess(midiAccess) {
-    // when we get a succesful response, run this code
-    midi = midiAccess; // this is our raw MIDI rdata, inputs, outputs, and sysex status
-
-    let inputs = midi.inputs.values();
-    // loop over all available inputs and listen for any MIDI input
-    for (let input = inputs.next(); input && !input.done; input = inputs.next()) {
-        // each time there is a midi message call the onMIDIMessage function
-        input.value.onmidimessage = onMIDIMessage;
-    }
-}
-
-function onMIDIFailure(error) {
-    // when we get a failed response, run this code
-    console.log("No access to MIDI devices or your browser doesn't support WebMIDI API. Please use WebMIDIAPIShim " + error);
-}
 
 function getHighestPriorityNotes(notes) {
     let sorted = notes.slice().sort();
@@ -274,119 +452,6 @@ function reclaimVoices(voices, keysPressed) {
     }
 }
 
-function allocateVoices(voices, notes) {
-    let highestPriorityNotes = getHighestPriorityNotes(notes);
-    console.log("highestPriorityNotes", highestPriorityNotes);
-
-    let allocatedNotes = Object.keys(voices);
-    allocatedNotes = allocatedNotes.map(function(x) { return +x; });
-
-    let noteToStealFrom = undefined;
-    for (let i = 0; i < allocatedNotes.length; ++i) {
-
-        let idx = highestPriorityNotes.indexOf(allocatedNotes[i]);
-        if (idx === -1) {
-            noteToStealFrom = allocatedNotes[i];
-            break;
-        } else {
-            console.log("Found allocatedNote", allocatedNotes[i], " at index i ", idx, " val =  ", highestPriorityNotes[idx]);
-        }
-    }
-
-    let noteToAllocate = undefined;
-
-    for (let i = 0; i < highestPriorityNotes.length; ++i) {
-        if (!(highestPriorityNotes[i] in voices)) {
-            noteToAllocate = highestPriorityNotes[i];
-            break;
-        }
-    }
-
-    if (noteToAllocate) {
-        console.log("noteToAllocate:", noteToAllocate);
-
-        if (noteToStealFrom) {
-            killNote(voices, noteToStealFrom);
-        }
-        voices[noteToAllocate] = createVoice(noteToAllocate);
-    }
-}
-
-function onMIDIMessage(message) {
-    let data = message.data; // this gives us our [command/channel, note, velocity] data.
-    // console.log('MIDI data', data); // MIDI data [144, 63, 73]
-    let cmd = data[0] >> 4;
-    let channel = data[0] & 0xf;
-    // let type = data[0] & 0xf0;
-    let note = data[1];
-    let velocity = data[2];
-    console.log("cmd, channel, note, velocity", cmd, channel, note, velocity);
-
-    let releasedKey = undefined;
-
-    switch (cmd) {
-        case MIDI_KEY_PRESSED:
-            gKeysPressed.push(note);
-            console.log("MIDI_KEY_PRESSED: gKeysPressed = ", gKeysPressed.map(readableNote));
-            break;
-        case MIDI_KEY_RELEASED:
-            let i = gKeysPressed.indexOf(note);
-            if (i > -1) {
-                gKeysPressed.splice(i, 1);
-            }
-            releasedKey = note;
-            console.log("MIDI_KEY_RELEASED: gKeysPressed = ", gKeysPressed.map(readableNote));
-            break;
-        case MIDI_CC_MESSAGE:
-            let velocityDiv = velocity / 127;
-            if (BINDINGS_ADS.has(note)) {
-                userADSR[note] = velocityDiv;
-            // } else if (note === BINDING_MASTER_VOLUME) {
-            //     userMasterVolume = velocityDiv;
-            //     console.log("userMasterVolume: ", userMasterVolume);
-            //     masterGainNode.gain.value = userMasterVolume;
-            } else if (note === BINDING_S) {
-                if (velocity > 0) {
-                    userADSR[BINDING_S] = (userADSR[BINDING_S] === MIN_GAIN_LEVEL) ?
-                        MAX_GAIN_LEVEL : MIN_GAIN_LEVEL;
-                }
-            } else if (note === BINDING_REVERB_WET_MIX) {
-                userReverbWetMix = velocityDiv;
-                console.log("userReverbWetMix: ", userReverbWetMix);
-                reverbDryGainNode.gain.value = 1 - userReverbWetMix;
-                reverbWetGainNode.gain.value = userReverbWetMix;
-            } else if (note === BINDING_BITCRUSHER) {
-                if (velocity > 0) {
-                    bitcrusherCurrentValue = (bitcrusherCurrentValue + 1) % BITCRUSHER_VALUES.length;
-                    console.log(bitcrusherCurrentValue);
-                }
-
-            } else if (note === BINDING_LFO_FREQ) {
-                userLFO[BINDING_LFO_FREQ] = (MAX_LFO_FREQ - MIN_LFO_FREQ) * velocityDiv + MIN_LFO_FREQ;
-                LFONode.frequency.value = userLFO[BINDING_LFO_FREQ];
-                console.log("userLFOFreq: ", userLFO[BINDING_LFO_FREQ]);
-
-            } else if (note === BINDING_LOPASS_FREQ) {
-                userLoPass[BINDING_LOPASS_FREQ] = (MAX_LOPASS_FREQ - MIN_LOPASS_FREQ) * velocityDiv + MIN_LOPASS_FREQ;
-                loPassFilterNode.frequency.value = userLoPass[BINDING_LOPASS_FREQ];
-                console.log("userLoPassFreq: ", userLoPass[BINDING_LOPASS_FREQ]);
-
-            } else if (note === BINDING_LOPASS_Q) {
-                userLoPass[BINDING_LOPASS_Q] = (MAX_FILTER_Q - MIN_FILTER_Q) * velocityDiv + MIN_FILTER_Q;
-                // loPassFilterNode.Q.value = userLoPass[BINDING_LOPASS_Q];
-                console.log("userLoPassQ: ", userLoPass[BINDING_LOPASS_Q]);
-            }
-    }
-
-    if (cmd === MIDI_KEY_PRESSED || cmd === MIDI_KEY_RELEASED) {
-        reclaimVoices(gVoices, gKeysPressed);
-
-        if (gKeysPressed.length > 0) {
-            allocateVoices(gVoices, gKeysPressed);
-        }
-    }
-}
-
 function frequencyFromNote(note) {
     const A4_FREQ = 440;
     const A4_MIDI_NUMBER = 69;
@@ -399,5 +464,6 @@ function readableNote(note) {
     let octave = parseInt(note / 12) - 1;
     return notes[note % 12] + octave.toString();
 }
+
 
 })();
