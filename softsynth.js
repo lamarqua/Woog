@@ -15,13 +15,13 @@ const DEFAULT_MASTER_VOLUME = 0.99;
 const DEFAULT_WET_MIX = 0;
 
 // Time-related constants
-const MIN_ENVELOP_TIME = 2;
-const MAX_A = 1000;
-const MAX_D = 1000;
-const MAX_R = 1000;
-const DEFAULT_A = MIN_ENVELOP_TIME;
-const DEFAULT_D = 500;
-const DEFAULT_R = 500;
+const MIN_ENVELOPE_DURATION = msToS(2);
+const MAX_ATTACK_DURATION = msToS(1000);
+const MAX_DECAY_DURATION = msToS(1000);
+const MAX_RELEASE_DURATION = msToS(1000);
+const DEFAULT_A = MIN_ENVELOPE_DURATION;
+const DEFAULT_D = msToS(500);
+const DEFAULT_R = msToS(500);
 
 // Filter-related
 const MIN_LOPASS_FREQ = 80;
@@ -39,6 +39,11 @@ const MAX_LFO_FREQ = 30;
 const BITCRUSHER_VALUES = [1, 2, 4, 8, 16, 32, 64];
 const BITCRUSHER_DEFAULT = 0;
 
+Object.resolve = function(path, obj) {
+    return path.split('.').reduce(function(prev, curr) {
+        return (prev ? prev[curr] : undefined)
+    }, obj || self)
+}
 
 function readableNote(note) {
     let notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
@@ -46,89 +51,107 @@ function readableNote(note) {
     return notes[note % 12] + octave.toString();
 }
 
-function createInputDevice() {
+
+function _createSetter(objectName, parameterName) {
+    return function(value) {
+        objectName[parameterName] = value;
+    }
+}
+
+// TODO: replace JS objects with Map in relevant cases
+
+// -----------------
+// -- CONTROLLERS --
+// -----------------
+function createMIDIInputController() {
     // MIDI constants
     const MIDI_KEY_PRESSED = 9;
     const MIDI_KEY_RELEASED = 8;
     const MIDI_CC_MESSAGE = 11;
     const MIDI_PC_MESSAGE = 12;
 
-    // TODO: inputDevice should have a proper flow type
-    let inputDevice = { keysPressed: [], setSynth: undefined, initializeMIDI: undefined,
-        synthParamModel: undefined, midi: undefined };
+    let inputDeviceController =
+        { setCCMessageCallback: function() {}
+        , setPCMessageCallback: function() {}
+        , setKeyCallback: function () {}
+        , initializeMIDI: function() {}
+        , CCMessageCallback: undefined
+        , PCMessageCallback: undefined
+        , KeyCallback: undefined
 
-    let _onMIDIMessage = function(message) {
-        if (inputDevice.synthParamModel) {
-            let data = message.data;
-            let cmd = data[0] >> 4;
-            let channel = data[0] & 0xf;
-            let note = data[1];
-            let velocity = data[2];
-            console.log("cmd, channel, note, velocity", cmd, channel, note, velocity);
+        , midi: undefined };
 
-            switch (cmd) {
-                case MIDI_KEY_PRESSED:
-                    inputDevice.keysPressed.push(note);
+    function _onMIDIMessage(message) {
+        let data = message.data;
+        let cmd = data[0] >> 4;
+        let channel = data[0] & 0xf;
+        let note = data[1];
+        let velocity = data[2];
+        console.log("cmd, channel, note, velocity", cmd, channel, note, velocity);
 
-                    // $FlowIgnore: TODO add proper type for inputDevice.synthParamModel
-                    inputDevice.synthParamModel.onKey("KeyPressed", inputDevice.keysPressed, note, velocity);
-                    break;
-                case MIDI_KEY_RELEASED:
-                    let i = inputDevice.keysPressed.indexOf(note);
-                    if (i > -1) {
-                        inputDevice.keysPressed.splice(i, 1);
-                    }
-
-                    // $FlowIgnore: TODO add proper type for inputDevice.synthParamModel
-                    inputDevice.synthParamModel.onKey("KeyReleased", inputDevice.keysPressed, note, velocity);
-                    break;
-                case MIDI_CC_MESSAGE:
-                    // $FlowIgnore: TODO add proper type for inputDevice.synthParamModel
-                    inputDevice.synthParamModel.onMessage("CCMessage", note, velocity);
-                    break;
-                case MIDI_PC_MESSAGE:
-                    // $FlowIgnore: TODO add proper type for inputDevice.synthParamModel
-                    inputDevice.synthParamModel.onMessage("PCMessage", note, velocity);
-                    break;
-            }
-        }
-    }
-
-    inputDevice.initializeMIDI = function() {
-        if (!inputDevice.synthParamModel) {
-            console.log("Initialize a synthParamModel before calling InitializeMIDI()");
-        } else {
-            // request MIDI access
-            if (navigator.requestMIDIAccess) {
-                navigator.requestMIDIAccess({
-                    sysex: false
-                }).then(onMIDISuccess, onMIDIFailure);
-            }
-
-            // midi functions
-            function onMIDISuccess(midiAccess) {
-                // when we get a succesful response, run this code
-                inputDevice.midi = midiAccess; // this is our raw MIDI rdata, inputs, outputs, and sysex status
-
-                let inputs = inputDevice.midi.inputs.values();
-                // loop over all available inputs and listen for any MIDI input
-                for (let input = inputs.next(); input && !input.done; input = inputs.next()) {
-                    // each time there is a midi message call the onMIDIMessage function
-                    input.value.onmidimessage = _onMIDIMessage;
+        switch (cmd) {
+            case MIDI_KEY_PRESSED:
+                if (inputDeviceController.KeyCallback) {
+                    inputDeviceController.KeyCallback("KeyPressed", note, velocity);
                 }
-            }
-
-            function onMIDIFailure(error) {
-            // when we get a failed response, run this code
-                console.log("No access to MIDI devices or your browser doesn't support WebMIDI API. Please use WebMIDIAPIShim " + error);
-            }
-
+                break;
+            case MIDI_KEY_RELEASED:
+                if (inputDeviceController.KeyCallback) {
+                    inputDeviceController.KeyCallback("KeyReleased", note, velocity);
+                }
+                break;
+            case MIDI_CC_MESSAGE:
+                if (inputDeviceController.CCMessageCallback) {
+                    inputDeviceController.CCMessageCallback(note, velocity);
+                }
+                break;
+            case MIDI_PC_MESSAGE:
+                if (inputDeviceController.PCMessageCallback) {
+                   inputDeviceController.PCMessageCallback(note, velocity);
+                }
+                break;
         }
     }
 
-    return inputDevice;
+    // -- METHODS --
+    // -------------
+    inputDeviceController.initializeMIDI = function() {
+        // request MIDI access
+        if (navigator.requestMIDIAccess) {
+            navigator.requestMIDIAccess({
+                sysex: false
+            }).then(onMIDISuccess, onMIDIFailure);
+        }
+
+        // midi functions
+        function onMIDISuccess(midiAccess) {
+            // when we get a succesful response, run this code
+            inputDeviceController.midi = midiAccess; // this is our raw MIDI rdata, inputs, outputs, and sysex status
+
+            let inputs = inputDeviceController.midi.inputs.values();
+            // loop over all available inputs and listen for any MIDI input
+            for (let input = inputs.next(); input && !input.done; input = inputs.next()) {
+                // each time there is a midi message call the onMIDIMessage function
+                input.value.onmidimessage = _onMIDIMessage;
+            }
+        }
+
+        function onMIDIFailure(error) {
+        // when we get a failed response, run this code
+            console.log("No access to MIDI devices or your browser doesn't support WebMIDI API. Please use WebMIDIAPIShim " + error);
+        }
+    }
+
+    inputDeviceController.setCCMessageCallback = _createSetter(inputDeviceController, "CCMessageCallback");
+    inputDeviceController.setPCMessageCallback = _createSetter(inputDeviceController, "PCMessageCallback");
+    inputDeviceController.setKeyCallback = _createSetter(inputDeviceController, "KeyCallback");
+
+    return inputDeviceController;
 }
 
+// -----------
+// -- MODEL --
+// -----------
 function createSynthParamModel() {
     const MIDI_NUMBER_A = 5;
     const MIDI_NUMBER_D = 6;
@@ -136,112 +159,130 @@ function createSynthParamModel() {
     const MIDI_NUMBER_S = 12;
     const MIDI_NUMBER_LOPASS_FREQ = 1;
     const MIDI_NUMBER_TREMOLO_FREQ = 2;
-    const MIDI_NUMBER_REVERB_WET_MIX = 7;
-    const MIDI_NUMBER_BITCRUSHER = 15;
+    const MIDI_NUMBER_REVERB_WET_MIX = 8;
+    const MIDI_NUMBER_BITCRUSHER_NEXT = 15;
     const MIDI_NUMBER_MASTER_VOLUME = 4;
 
     let synthParamModel =
-        { synthObject: undefined
+        { initializeSynthWithDefaultParams: function() {}
+        , setSynth: function() {}
+        , onCCMessage: function() {}
+        , onKey: function() {}
+
+        , synthObject: undefined
 
         , keysPressed: []
 
-        , parameters :
-            { attack: msToS(DEFAULT_A)
-            , decay: msToS(DEFAULT_D)
-            , sustain: DEFAULT_SUSTAIN
-            , release: msToS(DEFAULT_R)
+        , parameters : // All these parameters are stored in their respective units: GainValue, seconds, Hertz, ...
+            { "volumeEnvelopeAttack": DEFAULT_A
+            , "volumeEnvelopeDecay": DEFAULT_D
+            , "volumeEnvelopeSustain": DEFAULT_SUSTAIN
+            , "volumeEnvelopeRelease": DEFAULT_R
 
-            , loPassQ: DEFAULT_LOPASS_Q
-            , loPassFreq: DEFAULT_LOPASS_FREQ
+            , "loPassQ": DEFAULT_LOPASS_Q
+            , "loPassFreq": DEFAULT_LOPASS_FREQ
 
-            , tremoloFreq: DEFAULT_LFO_FREQ
+            , "tremoloFreq": DEFAULT_LFO_FREQ
 
-            , reverbWetMix: DEFAULT_WET_MIX
+            , "reverbWetMix": DEFAULT_WET_MIX
 
-            , bitCrusherDownsamplingRate: BITCRUSHER_DEFAULT
+            , "bitCrusherDownsamplingRate": BITCRUSHER_DEFAULT
 
-            , masterVolume: DEFAULT_MASTER_VOLUME }
-
+            , "masterVolume": DEFAULT_MASTER_VOLUME
+            }
     };
 
     const inputMappings =
-        { MIDI_NUMBER_A: "volumeEnvelopeAttack"
-        , MIDI_NUMBER_D: "volumeEnvelopeDecay"
-        , MIDI_NUMBER_S: "volumeEnvelopeSustain"
-        , MIDI_NUMBER_R: "volumeEnvelopeRelease"
+        { [MIDI_NUMBER_A]: "volumeEnvelopeAttack"
+        , [MIDI_NUMBER_D]: "volumeEnvelopeDecay"
+        , [MIDI_NUMBER_S]: "volumeEnvelopeSustain"
+        , [MIDI_NUMBER_R]: "volumeEnvelopeRelease"
 
-        , MIDI_NUMBER_LOPASS_FREQ: "loPassFreq"
+        , [MIDI_NUMBER_LOPASS_FREQ]: "loPassFreq"
 
-        , MIDI_NUMBER_TREMOLO_FREQ: "tremoloFreq"
+        , [MIDI_NUMBER_TREMOLO_FREQ]: "tremoloFreq"
 
-        , MIDI_NUMBER_REVERB_WET_MIX: "reverbWetMix"
+        , [MIDI_NUMBER_REVERB_WET_MIX]: "reverbWetMix"
 
-        , MIDI_NUMBER_BITCRUSHER: "bitCrusherDownsamplingRateNext"
+        , [MIDI_NUMBER_BITCRUSHER_NEXT]: "bitCrusherDownsamplingRate"
 
-        , MIDI_NUMBER_MASTER_VOLUME: "masterVolume"
+        , [MIDI_NUMBER_MASTER_VOLUME]: "masterVolume"
+    }
+
+    const lerpMappings =
+        { "volumeEnvelopeAttack": [MIN_ENVELOPE_DURATION, MAX_ATTACK_DURATION]
+        , "volumeEnvelopeDecay": [MIN_ENVELOPE_DURATION, MAX_DECAY_DURATION]
+        , "volumeEnvelopeRelease": [MIN_ENVELOPE_DURATION, MAX_RELEASE_DURATION]
+
+        , "loPassFreq": [MIN_LOPASS_FREQ, MAX_LOPASS_FREQ]
+        , "tremoloFreq": [MIN_LFO_FREQ, MAX_LFO_FREQ]
+    };
+
+    function _lerp(a, b, t) {
+        return (b - a) * t + a;
     }
 
     synthParamModel.initializeSynthWithDefaultParams = function() {
-        // TODO call setParam for all synthParamModel.parameters
+        Object.keys(synthParamModel.parameters).forEach(function(key) {
+            if (synthParamModel.synthObject) {
+                synthParamModel.synthObject.setParam(key, synthParamModel.parameters[key]);
+            }
+        });
     }
 
-    synthParamModel.setSynth = function(synthObject) {
-        synthParamModel.synthObject = synthObject;
-    }
+    synthParamModel.setSynth = _createSetter(synthParamModel, "synthObject");
 
-    synthParamModel.CCMessageCallback = function(messageNumber, value) {
+    synthParamModel.onCCMessage = function(messageNumber, value) {
         let paramName = inputMappings[messageNumber];
-        let valueNormalized = value / 127;
+        let normalizedValue = value / 127;
 
         if (paramName) {
-            synthObject.setParam(paramName, valueNormalized);
+            let paramLerpMapping = lerpMappings[paramName];
+            let finalValue = normalizedValue;
+            if (paramLerpMapping) {
+                finalValue = _lerp(paramLerpMapping[0], paramLerpMapping[1], normalizedValue);
+            }
+
+            // update model
+            synthParamModel.parameters[paramName] = finalValue;
+
+            // refresh view
+            synthParamModel.synthObject.setParam(paramName, finalValue);
         } else {
             console.log("No bindings for CC Message #", messageNumber);
         }
-        // if (BINDINGS_ADS.has(messageNumber)) {
-        //     userADSR[messageNumber] = valueNormalized;
-        //     // } else if (messageNumber === MIDI_NUMBER_MASTER_VOLUME) {
-        //     //     userMasterVolume = valueNormalized;
-        //     //     console.log("userMasterVolume: ", userMasterVolume);
-        //     //     masterGainNode.gain.value = userMasterVolume;
-        // } else if (messageNumber === BINDING_S) {
-        //     if (value > 0) {
-        //         userADSR[BINDING_S] = (userADSR[BINDING_S] === MIN_GAIN_LEVEL) ?
-        //         MAX_GAIN_LEVEL : MIN_GAIN_LEVEL;
-        //     }
-        // } else if (messageNumber === BINDING_REVERB_WET_MIX) {
-        //     userReverbWetMix = valueNormalized;
-        //     console.log("userReverbWetMix: ", userReverbWetMix);
-        //     synth.reverbDryGainNode.gain.value = 1 - userReverbWetMix;
-        //     synth.reverbWetGainNode.gain.value = userReverbWetMix;
-        // } else if (messageNumber === BINDING_BITCRUSHER) {
-        //     if (value > 0) {
-        //         bitcrusherCurrentValue = (bitcrusherCurrentValue + 1) % BITCRUSHER_VALUES.length;
-        //         console.log(bitcrusherCurrentValue);
-        //     }
+    }
 
-        // } else if (messageNumber === BINDING_LFO_FREQ) {
-        //     userLFO[BINDING_LFO_FREQ] = (MAX_LFO_FREQ - MIN_LFO_FREQ) * valueNormalized + MIN_LFO_FREQ;
-        //     synth.LFONode.frequency.value = userLFO[BINDING_LFO_FREQ];
-        //     console.log("usertremoloFreq: ", userLFO[BINDING_LFO_FREQ]);
+    synthParamModel.onKey = function(eventType, note, velocity) {
+        // update model
+        if (eventType == "KeyPressed") {
+            synthParamModel.keysPressed.push(note);
+        } else if (eventType === "KeyReleased") {
+            let i = synthParamModel.keysPressed.indexOf(note);
+            if (i > -1) {
+                synthParamModel.keysPressed.splice(i, 1);
+            }
+        }
 
-        // } else if (messageNumber === BINDING_LOPASS_FREQ) {
-        //     userLoPass[BINDING_LOPASS_FREQ] = (MAX_LOPASS_FREQ - MIN_LOPASS_FREQ) * valueNormalized + MIN_LOPASS_FREQ;
-        //     synth.loPassFilterNode.frequency.value = userLoPass[BINDING_LOPASS_FREQ];
-        //     console.log("userLoPassFreq: ", userLoPass[BINDING_LOPASS_FREQ]);
-
-        // } else if (messageNumber === BINDING_LOPASS_Q) {
-        //     userLoPass[BINDING_LOPASS_Q] = (MAX_FILTER_Q - MIN_FILTER_Q) * valueNormalized + MIN_FILTER_Q;
-        //         // loPassFilterNode.Q.value = userLoPass[BINDING_LOPASS_Q];
-        //         console.log("userLoPassQ: ", userLoPass[BINDING_LOPASS_Q]);
-        // }
+        if (synthParamModel.synthObject) {
+            synthParamModel.synthObject.onKey(eventType, synthParamModel.keysPressed, note, velocity);
+        }
     }
 
     return synthParamModel;
 }
 
+// -----------
+// -- VIEW --
+// -----------
 function createSynth() {
-    let synth = { voices: {}, onKey: undefined, onMessage: undefined };
+    let synth =
+        { onKey: function() {}
+        , setParam: function() {}
+
+        , audioContext: undefined
+        , voices: {}
+    };
 
     // -- UTILS --
     // -----------
@@ -257,10 +298,6 @@ function createSynth() {
         return sorted.slice(0, SYNTH_MAX_VOICES); // TODO: is slice with end index past the lenght of the array legal????
     }
 
-    function _lerp(a, b, t) {
-        return (b - a) * t + a;
-    }
-
     function _msToS(milliseconds) {
         return milliseconds / 1000;
     }
@@ -268,11 +305,12 @@ function createSynth() {
     // -- SYNTH TOPOLOGY --
     // --------------------
     function _initialize() {
+        // TODO use parameters instead of DEFAULT_* constants
         let audioContext = new AudioContext();
         synth.audioContext = audioContext;
 
         let masterGainNode = audioContext.createGain();
-        masterGainNode.gain.value = userMasterVolume;
+        masterGainNode.gain.value = DEFAULT_MASTER_VOLUME;
         masterGainNode.connect(audioContext.destination);
         synth.masterGainNode = masterGainNode;
 
@@ -287,6 +325,7 @@ function createSynth() {
         synth.reverbWetGainNode = reverbWetGainNode;
 
         // $FlowIgnore
+        // TODO move reverbData.. somewhere else ?
         let reverbBuffer = audioContext.createBuffer(2, window.reverbData.left.length, audioContext.sampleRate);
         reverbBuffer.copyToChannel(Float32Array.from(window.reverbData.left), 0, 0);
         reverbBuffer.copyToChannel(Float32Array.from(window.reverbData.right), 1, 0);
@@ -305,7 +344,7 @@ function createSynth() {
         synth.loPassFilterNode = loPassFilterNode;
 
         let oscConnectNode = audioContext.createGain();
-        oscConnectNode.gain.value = userMasterVolume;
+        oscConnectNode.gain.value = DEFAULT_MASTER_VOLUME; // FIXME
         oscConnectNode.connect(loPassFilterNode);
         synth.oscConnectNode = oscConnectNode;
 
@@ -343,7 +382,7 @@ function createSynth() {
                 let inputData = inputBuffer.getChannelData(channel);
                 let outputData = outputBuffer.getChannelData(channel);
 
-                let reductionFactor = BITCRUSHER_VALUES[bitcrusherCurrentValue];
+                let reductionFactor = BITCRUSHER_VALUES[parameterStorage["bitCrusherDownsamplingRate"]];
                 for (let sample = 0; sample < inputBuffer.length; sample += reductionFactor) {
                     let sum = 0.0;
                     for (let i = 0; i < reductionFactor; ++i) {
@@ -374,13 +413,10 @@ function createSynth() {
         let gainNode = synth.audioContext.createGain();
         gainNode.gain.value = MIN_GAIN_LEVEL;
 
-        let durationA = _msToS(_lerp(MIN_ENVELOP_TIME, MAX_A, userADSR[BINDING_A]));
-        let durationD = _msToS(_lerp(MIN_ENVELOP_TIME, MAX_D, userADSR[BINDING_D]));
-        let sustainLevel = Math.max(MIN_GAIN_LEVEL, userADSR[BINDING_S]);
+        let durationA = parameterStorage["volumeEnvelopeAttack"];
+        let durationD = parameterStorage["volumeEnvelopeDecay"];
+        let sustainLevel = parameterStorage["volumeEnvelopeSustain"]; //Math.max(MIN_GAIN_LEVEL, userADSR[BINDING_S]);
 
-        // console.log("durationA: ", durationA);
-        // console.log("durationD: ", durationD);
-        // console.log("sustainLevel: ", sustainLevel);
 
         let rampA = new Float32Array([MIN_GAIN_LEVEL, MAX_GAIN_LEVEL]);
         gainNode.gain.setValueCurveAtTime(rampA, synth.audioContext.currentTime, durationA);
@@ -445,9 +481,9 @@ function createSynth() {
 
         let gainNode = voices[note]["gainNode"];
 
-        let durationR = _msToS(_lerp(MIN_ENVELOP_TIME, MAX_R, userADSR[BINDING_R]));
-        console.log("durationR", durationR);
+        let durationR = parameterStorage["volumeEnvelopeRelease"];
         gainNode.gain.cancelScheduledValues(synth.audioContext.currentTime);
+
         let rampR = new Float32Array([voices[note]["gainNode"].gain.value, MIN_GAIN_LEVEL]);
         gainNode.gain.setValueCurveAtTime(rampR, synth.audioContext.currentTime, durationR);
 
@@ -462,11 +498,11 @@ function createSynth() {
         , "volumeEnvelopeSustain": undefined
         , "volumeEnvelopeRelease": undefined
 
-        , "loPassFreq": synth.loPassFilterNode.frequency.value
-        , "tremoloFreq": synth.LFONode.frequency.value
-        , "reverbWetMix": [synth.reverbWetGainNode.gain.value, synth.reverbDryGainNode.gain.value]
-        , "bitCrusherDownsamplingRate": BITCRUSHER_VALUES
-        , "masterVolume": synth.masterGainNode.gain.value
+        , "loPassFreq": "loPassFilterNode.frequency"
+        , "tremoloFreq": "LFONode.frequency"
+        , "reverbWetMix": ["reverbWetGainNode.gain", "reverbDryGainNode.gain"]
+        , "bitCrusherDownsamplingRate": BITCRUSHER_VALUES // TODO CHANGE THIS
+        , "masterVolume": "masterGainNode.gain"
     };
 
     const parameterTypes =
@@ -486,20 +522,21 @@ function createSynth() {
 
     synth.setParam = function(paramName, value) {
         let paramType = parameterTypes[paramName];
-        let paramBinding = parameterBindings[paramName];
+        let paramBindingName = parameterBindings[paramName];
 
-        if (paramBinding) {
-            if (paramType == "scalar") {
-                paramBinding = value;
-            } else if (paramType == "mix") {
-                paramBinding[0] = value;
-                paramBinding[1] = 1 - value;
-            } else if (paramType == "stored") {
+        if (paramType == "scalar" && paramBindingName) {
+            let paramObject = Object.resolve(paramBindingName, synth);
+            paramObject.value = value;
+        } else if (paramType == "mix" && paramBindingName) {
+            let paramObjects = [Object.resolve(paramBindingName[0], synth),
+                                Object.resolve(paramBindingName[1], synth)];
+            paramObjects[0] = value;
+            paramObjects[1] = value;
+        } else if (paramType == "stored") {
+            parameterStorage[paramName] = value;
+        } else if (paramType == "listValueStored") {
+            if (value < paramBindingName.length) { // CHANGE THIS
                 parameterStorage[paramName] = value;
-            } else if (paramType == "listValueStored") {
-                if (value < paramBinding.length) {
-                    parameterStorage[paramName] = value;
-                }
             }
         }
     }
@@ -523,14 +560,16 @@ function createSynth() {
 }
 
 let synth = createSynth();
-let synthParamModel = createMappingInterface();
-let MIDIInputDevice = createMIDIInputDevice();
+let synthParamModel = createSynthParamModel();
+let MIDIInputController = createMIDIInputController();
 
 synthParamModel.setSynth(synth);
 synthParamModel.initializeSynthWithDefaultParams();
 
-MIDIInputDevice.setCCMessageCallback(synth.CCMessageCallback);
-MIDIInputDevice.initializeMIDI();
+MIDIInputController.setCCMessageCallback(synthParamModel.onCCMessage);
+// MIDIInputController.setPCMessageCallback(synthParamModel.onPCMessage);
+MIDIInputController.setKeyCallback(synthParamModel.onKey);
+MIDIInputController.initializeMIDI();
 
 // Create audio context
 
