@@ -212,6 +212,8 @@ function createSynthParamModel() {
     }
 
     // TODO: is toggle input always a list??
+    // think really hard about whether this is always the case, and either way
+    // refactor the code to avoid the duplication
     const inputTypes =
         { [MIDI_NUMBER_A]: "knob"
         , [MIDI_NUMBER_D]: "knob"
@@ -424,7 +426,6 @@ function createSynth() {
                     for (let i = 0; i < reductionFactor; ++i) {
                         sum += inputData[sample + i];
                     }
-
 
                     sum /= reductionFactor;
                     sum = _quantizeResolution(sum, 8);
