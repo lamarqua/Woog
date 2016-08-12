@@ -10,9 +10,8 @@ const SYNTH_OSC_TYPE = "sawtooth";
 const MIN_GAIN_LEVEL = 0.0;
 const MAX_GAIN_LEVEL = 0.999;
 
-const DEFAULT_SUSTAIN = MAX_GAIN_LEVEL;
 const DEFAULT_MASTER_VOLUME = 0.99;
-const DEFAULT_WET_MIX = 0;
+const DEFAULT_WET_MIX = 1;
 
 // Time-related constants
 const MIN_ENVELOPE_DURATION = msToS(2);
@@ -36,8 +35,11 @@ const DEFAULT_LFO_FREQ = 0.001; // FIXME
 const MIN_LFO_FREQ = DEFAULT_LFO_FREQ;
 const MAX_LFO_FREQ = 30;
 
+const SUSTAIN_VALUES = [0, 0.5, 1];
+const SUSTAIN_DEFAULT_INDEX = 2;
+
 const BITCRUSHER_VALUES = [1, 2, 4, 8, 16, 32, 64];
-const BITCRUSHER_DEFAULT = 0;
+const BITCRUSHER_DEFAULT_INDEX = 0;
 
 Object.resolve = function(path, obj) {
     return path.split('.').reduce(function(prev, curr) {
@@ -176,7 +178,7 @@ function createSynthParamModel() {
         , parameters : // All these parameters are stored in their respective units: GainValue, seconds, Hertz, ...
             { "volumeEnvelopeAttack": DEFAULT_A
             , "volumeEnvelopeDecay": DEFAULT_D
-            , "volumeEnvelopeSustain": DEFAULT_SUSTAIN
+            , "volumeEnvelopeSustain": [SUSTAIN_DEFAULT_INDEX, SUSTAIN_VALUES]
             , "volumeEnvelopeRelease": DEFAULT_R
 
             , "loPassQ": DEFAULT_LOPASS_Q
@@ -186,7 +188,7 @@ function createSynthParamModel() {
 
             , "reverbWetMix": DEFAULT_WET_MIX
 
-            , "bitCrusherDownsamplingRate": BITCRUSHER_DEFAULT
+            , "bitCrusherDownsamplingRate": [BITCRUSHER_DEFAULT_INDEX, BITCRUSHER_VALUES]
 
             , "masterVolume": DEFAULT_MASTER_VOLUME
             }
@@ -207,6 +209,24 @@ function createSynthParamModel() {
         , [MIDI_NUMBER_BITCRUSHER_NEXT]: "bitCrusherDownsamplingRate"
 
         , [MIDI_NUMBER_MASTER_VOLUME]: "masterVolume"
+    }
+
+    // TODO: is toggle input always a list??
+    const inputTypes =
+        { [MIDI_NUMBER_A]: "knob"
+        , [MIDI_NUMBER_D]: "knob"
+        , [MIDI_NUMBER_S]: "toggle"
+        , [MIDI_NUMBER_R]: "knob"
+
+        , [MIDI_NUMBER_LOPASS_FREQ]: "knob"
+
+        , [MIDI_NUMBER_TREMOLO_FREQ]: "knob"
+
+        , [MIDI_NUMBER_REVERB_WET_MIX]: "knob"
+
+        , [MIDI_NUMBER_BITCRUSHER_NEXT]: "toggle"
+
+        , [MIDI_NUMBER_MASTER_VOLUME]: "knob"
     }
 
     const lerpMappings =
@@ -238,16 +258,32 @@ function createSynthParamModel() {
 
         if (paramName) {
             let paramLerpMapping = lerpMappings[paramName];
-            let finalValue = normalizedValue;
-            if (paramLerpMapping) {
-                finalValue = _lerp(paramLerpMapping[0], paramLerpMapping[1], normalizedValue);
+
+            let newParamValue = undefined;
+
+            if (inputTypes[paramName] === "knob") {
+                newParamValue = normalizedValue;
+                if (paramLerpMapping) {
+                    newParamValue = _lerp(paramLerpMapping[0], paramLerpMapping[1], normalizedValue);
+                }
+
+
+                synthParamModel.parameters[paramName] = newParamValue;
+                synthParamModel.synthObject.setParam(paramName, newParamValue);
+
+            } else if (inputTypes[messageNumber] === "toggle") {
+                if (value > 0) {
+                    let idx = synthParamModel.parameters[paramName][0];
+                    let array = synthParamModel.parameters[paramName][1];
+                    let newIndex = (idx + 1) % array.length;
+                    newParamValue = [newIndex, array];
+
+                    synthParamModel.parameters[paramName] = newParamValue;
+                    synthParamModel.synthObject.setParam(paramName, newParamValue);
+                }
             }
 
-            // update model
-            synthParamModel.parameters[paramName] = finalValue;
 
-            // refresh view
-            synthParamModel.synthObject.setParam(paramName, finalValue);
         } else {
             console.log("No bindings for CC Message #", messageNumber);
         }
@@ -382,7 +418,7 @@ function createSynth() {
                 let inputData = inputBuffer.getChannelData(channel);
                 let outputData = outputBuffer.getChannelData(channel);
 
-                let reductionFactor = BITCRUSHER_VALUES[parameterStorage["bitCrusherDownsamplingRate"]];
+                let reductionFactor = parameterStorage["bitCrusherDownsamplingRate"];
                 for (let sample = 0; sample < inputBuffer.length; sample += reductionFactor) {
                     let sum = 0.0;
                     for (let i = 0; i < reductionFactor; ++i) {
@@ -416,7 +452,6 @@ function createSynth() {
         let durationA = parameterStorage["volumeEnvelopeAttack"];
         let durationD = parameterStorage["volumeEnvelopeDecay"];
         let sustainLevel = parameterStorage["volumeEnvelopeSustain"]; //Math.max(MIN_GAIN_LEVEL, userADSR[BINDING_S]);
-
 
         let rampA = new Float32Array([MIN_GAIN_LEVEL, MAX_GAIN_LEVEL]);
         gainNode.gain.setValueCurveAtTime(rampA, synth.audioContext.currentTime, durationA);
@@ -495,7 +530,7 @@ function createSynth() {
     const parameterBindings =
         { "volumeEnvelopeAttack": undefined // undefined because they're gonna be in storage
         , "volumeEnvelopeDecay": undefined
-        , "volumeEnvelopeSustain": undefined
+        , "volumeEnvelopeSustain": SUSTAIN_VALUES
         , "volumeEnvelopeRelease": undefined
 
         , "loPassFreq": "loPassFilterNode.frequency"
@@ -508,7 +543,7 @@ function createSynth() {
     const parameterTypes =
         { "volumeEnvelopeAttack": "stored"
         , "volumeEnvelopeDecay": "stored"
-        , "volumeEnvelopeSustain": "stored"
+        , "volumeEnvelopeSustain": "listValueStored"
         , "volumeEnvelopeRelease": "stored"
 
         , "loPassFreq": "scalar"
@@ -521,6 +556,7 @@ function createSynth() {
     let parameterStorage = {};
 
     synth.setParam = function(paramName, value) {
+        console.log(paramName, ": ", value);
         let paramType = parameterTypes[paramName];
         let paramBindingName = parameterBindings[paramName];
 
@@ -530,13 +566,15 @@ function createSynth() {
         } else if (paramType == "mix" && paramBindingName) {
             let paramObjects = [Object.resolve(paramBindingName[0], synth),
                                 Object.resolve(paramBindingName[1], synth)];
-            paramObjects[0] = value;
-            paramObjects[1] = value;
+            paramObjects[0].value = value;
+            paramObjects[1].value = 1 - value;
         } else if (paramType == "stored") {
             parameterStorage[paramName] = value;
         } else if (paramType == "listValueStored") {
-            if (value < paramBindingName.length) { // CHANGE THIS
-                parameterStorage[paramName] = value;
+            let idx = value[0];
+            let array = value[1];
+            if (idx < array.length) { // CHANGE THIS
+                parameterStorage[paramName] = array[idx];
             }
         }
     }
