@@ -162,7 +162,7 @@ function createSynthParamModel() {
     const MIDI_NUMBER_LOPASS_FREQ = 1;
     const MIDI_NUMBER_TREMOLO_FREQ = 2;
     const MIDI_NUMBER_REVERB_WET_MIX = 8;
-    const MIDI_NUMBER_BITCRUSHER_NEXT = 15;
+    const MIDI_NUMBER_BITCRUSHER_NEXT = 16;
     const MIDI_NUMBER_MASTER_VOLUME = 4;
 
     let synthParamModel =
@@ -263,7 +263,7 @@ function createSynthParamModel() {
 
             let newParamValue = undefined;
 
-            if (inputTypes[paramName] === "knob") {
+            if (inputTypes[messageNumber] === "knob") {
                 newParamValue = normalizedValue;
                 if (paramLerpMapping) {
                     newParamValue = _lerp(paramLerpMapping[0], paramLerpMapping[1], normalizedValue);
