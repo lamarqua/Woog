@@ -65,6 +65,27 @@ function _createSetter(objectName, parameterName) {
 // -----------------
 // -- CONTROLLERS --
 // -----------------
+function createPCInputController() {
+    const keyMappings = new Map([
+        [65, 'C4'],
+        [87, 'C#4'],
+        [83, 'D4'],
+        [69, 'D#4'],
+        [68, 'E4'],
+        [70, 'F4'],
+        [84, 'F#4'],
+        [71, 'G4'],
+        [89, 'G#4'],
+        [72, 'A4'],
+        [85, 'A#4'],
+        [74, 'B4']
+    ]);
+
+    document.addEventListener('keydown', (event) => {
+            
+    });
+}    
+
 function createMIDIInputController() {
     // MIDI constants
     const MIDI_KEY_PRESSED = 9;
