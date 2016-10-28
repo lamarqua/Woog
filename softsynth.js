@@ -66,25 +66,71 @@ function _createSetter(objectName, parameterName) {
 // -- CONTROLLERS --
 // -----------------
 function createPCInputController() {
-    const keyMappings = new Map([
-        [65, 'C4'],
-        [87, 'C#4'],
-        [83, 'D4'],
-        [69, 'D#4'],
-        [68, 'E4'],
-        [70, 'F4'],
-        [84, 'F#4'],
-        [71, 'G4'],
-        [89, 'G#4'],
-        [72, 'A4'],
-        [85, 'A#4'],
-        [74, 'B4']
-    ]);
+    const startOctave = 2;
+    const keyMappingPairs = [
+        [65, 'C'],  // 60
+        [87, 'C#'], // 61
+        [83, 'D'],  // 62
+        [69, 'D#'], // 63
+        [68, 'E'],  // 64
+        [70, 'F'],  // 65
+        [84, 'F#'], // 66
+        [71, 'G'],  // 67
+        [89, 'G#'], // 68
+        [72, 'A'],  // 69
+        [85, 'A#'], // 70
+        [74, 'B'],  // 71
+        [75, 'C+'],
+    ];
+
+    const keyMappings = new Map(keyMappingPairs);
+
+    let PCKeyboardController =
+        { setCCMessageCallback: function() {}
+        , setPCMessageCallback: function() {}
+        , setKeyCallback: function () {}
+        , CCMessageCallback: undefined
+        , PCMessageCallback: undefined
+        , KeyCallback: undefined
+    };
+
+    // TODO: refactor all of this. This is ugly.
+    function _noteToMIDIMessage(note) {
+        var idx = -1;
+        for (let i = 0; i < keyMappingPairs.length; ++i) {
+            if (keyMappingPairs[i][1] === note) {
+                idx = i;
+                break;
+            }
+        }
+
+        return 60 + idx + (12 * (startOctave - 4));
+    }
 
     document.addEventListener('keydown', (event) => {
-            
+        let note = undefined;
+        if (note = keyMappings.get(event.keyCode)) {
+            let message = _noteToMIDIMessage(note);
+            const velocity = 127;
+            PCKeyboardController.KeyCallback("KeyPressed", message, velocity)
+        }
     });
-}    
+
+    document.addEventListener('keyup', (event) => {
+        let note = undefined;
+        if (note = keyMappings.get(event.keyCode)) {
+            let message = _noteToMIDIMessage(note);
+            const velocity = 127;
+            PCKeyboardController.KeyCallback("KeyReleased", message, velocity)
+        }
+    });
+
+    PCKeyboardController.setCCMessageCallback = _createSetter(PCKeyboardController, "CCMessageCallback");
+    PCKeyboardController.setPCMessageCallback = _createSetter(PCKeyboardController, "PCMessageCallback");
+    PCKeyboardController.setKeyCallback = _createSetter(PCKeyboardController, "KeyCallback");
+
+    return PCKeyboardController;
+}
 
 function createMIDIInputController() {
     // MIDI constants
@@ -622,14 +668,18 @@ function createSynth() {
 let synth = createSynth();
 let synthParamModel = createSynthParamModel();
 let MIDIInputController = createMIDIInputController();
+let PCInputController = createPCInputController();
 
 synthParamModel.setSynth(synth);
 synthParamModel.initializeSynthWithDefaultParams();
 
 MIDIInputController.setCCMessageCallback(synthParamModel.onCCMessage);
-// MIDIInputController.setPCMessageCallback(synthParamModel.onPCMessage);
 MIDIInputController.setKeyCallback(synthParamModel.onKey);
 MIDIInputController.initializeMIDI();
+
+PCInputController.setCCMessageCallback(synthParamModel.onCCMessage);
+PCInputController.setKeyCallback(synthParamModel.onKey);
+
 
 // Create audio context
 
