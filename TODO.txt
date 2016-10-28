@@ -18,14 +18,19 @@ TODO.txt
  * having basic interface to show values
  * visualization with built FFT stuff
  * see if we can read MIDI files?
- * BitCrushing
+
+ * handle case where we want to disable LFO
 
 
 - Architecture and code
  * investigate Flow
  * architecture: create higher level objects such as Envelopes, ReverbNodeWithMix, MultiOscillator, etc... And how for example LFO node and Envelope node would have the same interface
+ 	 * investigate how to refactor for non-fixed topology
+
  * investigate user interface
  * knob switching / better utilization
+ * PC keyboard input: https://github.com/cwilso/WebMIDIAPIShim ?????
+ * small stuff refactoring: using Map instead of JS objects // using proper data structures // merging similar dictionaries
 
 
  - Reading
